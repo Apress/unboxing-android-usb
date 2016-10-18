@@ -1,0 +1,2652 @@
+   1              		.cpu arm926ej-s
+   2              		.fpu softvfp
+   3              		.eabi_attribute 20, 1
+   4              		.eabi_attribute 21, 1
+   5              		.eabi_attribute 23, 3
+   6              		.eabi_attribute 24, 1
+   7              		.eabi_attribute 25, 1
+   8              		.eabi_attribute 26, 1
+   9              		.eabi_attribute 30, 6
+  10              		.eabi_attribute 18, 4
+  11              		.file	"cyfxusbhost.c"
+  19              	.Ltext0:
+  20              		.cfi_sections	.debug_frame
+  21              		.comm	glDMAEvent,40,4
+  22              		.comm	glHostAoACh,160,4
+  23              		.comm	glI2SRightCh,160,4
+  24              		.comm	glI2SLeftCh,160,4
+  25              		.comm	prodCount,4,4
+  26              		.comm	consCount,4,4
+  27              		.comm	bufCount,4,4
+  28              		.comm	lc,4,4
+  29              		.comm	rc,4,4
+  30              		.comm	applnThread,168,4
+  31              		.global	glIsApplnActive
+  32              		.bss
+  33              		.align	2
+  36              	glIsApplnActive:
+  37 0000 00000000 		.space	4
+  38              		.global	glIsPeripheralPresent
+  39              		.align	2
+  42              	glIsPeripheralPresent:
+  43 0004 00000000 		.space	4
+  44              		.comm	glSetupPkt,32,32
+  45              		.comm	glEp0Buffer,512,32
+  46              		.global	glHostOwner
+  49              	glHostOwner:
+  50 0008 00       		.space	1
+  51 0009 000000   		.text
+  52              		.align	2
+  53              		.global	CyFxAppErrorHandler
+  55              	CyFxAppErrorHandler:
+  56              	.LFB0:
+  57              		.file 1 "../cyfxusbhost.c"
+   1:../cyfxusbhost.c **** /*
+   2:../cyfxusbhost.c ****  ## Cypress USB 3.0 Platform source file (cyfxusbhost.c)
+   3:../cyfxusbhost.c ****  ## ===========================
+   4:../cyfxusbhost.c ****  ##
+   5:../cyfxusbhost.c ****  ##  Copyright Cypress Semiconductor Corporation, 2010-2011,
+   6:../cyfxusbhost.c ****  ##  All Rights Reserved
+   7:../cyfxusbhost.c ****  ##  UNPUBLISHED, LICENSED SOFTWARE.
+   8:../cyfxusbhost.c ****  ##
+   9:../cyfxusbhost.c ****  ##  CONFIDENTIAL AND PROPRIETARY INFORMATION
+  10:../cyfxusbhost.c ****  ##  WHICH IS THE PROPERTY OF CYPRESS.
+  11:../cyfxusbhost.c ****  ##
+  12:../cyfxusbhost.c ****  ##  Use of this file is governed
+  13:../cyfxusbhost.c ****  ##  by the license agreement included in the file
+  14:../cyfxusbhost.c ****  ##
+  15:../cyfxusbhost.c ****  ##     <install>/license/license.txt
+  16:../cyfxusbhost.c ****  ##
+  17:../cyfxusbhost.c ****  ##  where <install> is the Cypress software
+  18:../cyfxusbhost.c ****  ##  installation root directory path.
+  19:../cyfxusbhost.c ****  ##
+  20:../cyfxusbhost.c ****  ## ===========================
+  21:../cyfxusbhost.c **** */
+  22:../cyfxusbhost.c **** 
+  23:../cyfxusbhost.c **** /* This file illustrates the usb host mode application example. */
+  24:../cyfxusbhost.c **** 
+  25:../cyfxusbhost.c **** /*
+  26:../cyfxusbhost.c ****    This example illustrates the use of the FX3 firmware APIs to implement
+  27:../cyfxusbhost.c ****    USB host mode operation. The example supports simple HID mouse class
+  28:../cyfxusbhost.c ****    and simple MSC class devices.
+  29:../cyfxusbhost.c **** 
+  30:../cyfxusbhost.c ****    USB HID MOUSE DRIVER:
+  31:../cyfxusbhost.c **** 
+  32:../cyfxusbhost.c ****    A simple single interface USB HID mouse will be successfully enumerated
+  33:../cyfxusbhost.c ****    and the current offset will be printed via the UART debug logs.
+  34:../cyfxusbhost.c **** 
+  35:../cyfxusbhost.c ****    We support only single interface with interface class = HID(0x03),
+  36:../cyfxusbhost.c ****    interface sub class = Boot (0x01) and interface protocol = Mouse (0x02).
+  37:../cyfxusbhost.c ****    This example supports only 4 byte input reports with the following format:
+  38:../cyfxusbhost.c ****         BYTE0: Bitmask for each of the button present.
+  39:../cyfxusbhost.c ****         BYTE1: Signed movement in X direction.
+  40:../cyfxusbhost.c ****         BYTE2: Signed movement in Y direction.
+  41:../cyfxusbhost.c ****         BYTE3: Signed movement in scroll wheel.
+  42:../cyfxusbhost.c ****    Further types can be implemented by decoding the HID descriptor.
+  43:../cyfxusbhost.c **** 
+  44:../cyfxusbhost.c ****    Care should be taken so that an USB host is not connected to FX3 while
+  45:../cyfxusbhost.c ****    host stack is active. This will mean that both sides will be driving
+  46:../cyfxusbhost.c ****    the VBUS causing a hardware damage.
+  47:../cyfxusbhost.c **** 
+  48:../cyfxusbhost.c ****    Please refer to the FX3 DVK user manual for enabling VBUS control.
+  49:../cyfxusbhost.c ****    The current example controls the VBUS supply via GPIO 21. The example assumes
+  50:../cyfxusbhost.c ****    that a low on this line will turn on VBUS and allow remotely connected B-device
+  51:../cyfxusbhost.c ****    to enumerate. A high / tri-state  on this line will turn off VBUS supply from
+  52:../cyfxusbhost.c ****    the board. Also this requires that FX3 DVK is powered using external power supply.
+  53:../cyfxusbhost.c ****    VBATT should also be enabled and connected. Depending upon the VBUS control,
+  54:../cyfxusbhost.c ****    update the CY_FX_OTG_VBUS_ENABLE_VALUE and CY_FX_OTG_VBUS_DISABLE_VALUE definitions
+  55:../cyfxusbhost.c ****    in cyfxusbhost.h file.
+  56:../cyfxusbhost.c **** 
+  57:../cyfxusbhost.c ****    USB MSC DRIVER:
+  58:../cyfxusbhost.c **** 
+  59:../cyfxusbhost.c ****    A simple single interface USB BOT MSC device will be successfully 
+  60:../cyfxusbhost.c ****    enumerated and storage parameters will be queried. The example shall read
+  61:../cyfxusbhost.c ****    the last sector of data, save it in local buffers and write a fixed pattern
+  62:../cyfxusbhost.c ****    to location. It will  then read and verify the data written. Once this is
+  63:../cyfxusbhost.c ****    done, the original data will be written back to the storage.
+  64:../cyfxusbhost.c ****    
+  65:../cyfxusbhost.c ****    NOTE: If MSC device is unplugged before all transactions have completed
+  66:../cyfxusbhost.c ****    or if the example encounters an error, the data on the drive might be
+  67:../cyfxusbhost.c ****    corrupted.
+  68:../cyfxusbhost.c **** */
+  69:../cyfxusbhost.c **** 
+  70:../cyfxusbhost.c **** #include "cyu3system.h"
+  71:../cyfxusbhost.c **** #include "cyu3os.h"
+  72:../cyfxusbhost.c **** #include "cyu3dma.h"
+  73:../cyfxusbhost.c **** #include "cyu3error.h"
+  74:../cyfxusbhost.c **** #include "cyu3usb.h"
+  75:../cyfxusbhost.c **** #include "cyu3usbhost.h"
+  76:../cyfxusbhost.c **** #include "cyu3usbotg.h"
+  77:../cyfxusbhost.c **** #include "cyu3uart.h"
+  78:../cyfxusbhost.c **** #include "cyu3gpio.h"
+  79:../cyfxusbhost.c **** #include "cyu3utils.h"
+  80:../cyfxusbhost.c **** #include "cyfxusbhost.h"
+  81:../cyfxusbhost.c **** #include "cyu3i2s.h"
+  82:../cyfxusbhost.c **** 
+  83:../cyfxusbhost.c **** extern uint32_t prodCount, consCount, bufCount;
+  84:../cyfxusbhost.c **** CyU3PThread applnThread;                        /* Application thread structure */
+  85:../cyfxusbhost.c **** CyBool_t glIsApplnActive = CyFalse;             /* Whether the application is active or not. */
+  86:../cyfxusbhost.c **** CyBool_t glIsPeripheralPresent = CyFalse;       /* Whether a remote peripheral is present or not. *
+  87:../cyfxusbhost.c **** 
+  88:../cyfxusbhost.c **** uint8_t glSetupPkt[CY_FX_HOST_EP0_SETUP_SIZE] __attribute__ ((aligned (32)));   /* Setup packet buf
+  89:../cyfxusbhost.c **** uint8_t glEp0Buffer[CY_FX_HOST_EP0_BUFFER_SIZE] __attribute__ ((aligned (32))); /* Buffer to send /
+  90:../cyfxusbhost.c **** 
+  91:../cyfxusbhost.c **** uint8_t glHostOwner = CY_FX_HOST_OWNER_NONE;    /* Current owner for the host controller. */
+  92:../cyfxusbhost.c **** 
+  93:../cyfxusbhost.c **** /* Application Error Handler */
+  94:../cyfxusbhost.c **** void
+  95:../cyfxusbhost.c **** CyFxAppErrorHandler (
+  96:../cyfxusbhost.c ****         CyU3PReturnStatus_t apiRetStatus    /* API return status */
+  97:../cyfxusbhost.c ****         )
+  98:../cyfxusbhost.c **** {
+  58              		.loc 1 98 0
+  59              		.cfi_startproc
+  60              		@ args = 0, pretend = 0, frame = 8
+  61              		@ frame_needed = 1, uses_anonymous_args = 0
+  62              		@ link register save eliminated.
+  63 0000 04B02DE5 		str	fp, [sp, #-4]!
+  64              	.LCFI0:
+  65              		.cfi_def_cfa_offset 4
+  66 0004 00B08DE2 		add	fp, sp, #0
+  67              		.cfi_offset 11, -4
+  68              	.LCFI1:
+  69              		.cfi_def_cfa_register 11
+  70 0008 0CD04DE2 		sub	sp, sp, #12
+  71 000c 08000BE5 		str	r0, [fp, #-8]
+  72              	.L2:
+  99:../cyfxusbhost.c ****     /* Application failed with the error code apiRetStatus */
+ 100:../cyfxusbhost.c **** 
+ 101:../cyfxusbhost.c ****     /* Add custom debug or recovery actions here */
+ 102:../cyfxusbhost.c **** 
+ 103:../cyfxusbhost.c ****     /* Loop Indefinitely */
+ 104:../cyfxusbhost.c ****     for (;;)
+ 105:../cyfxusbhost.c ****     {
+ 106:../cyfxusbhost.c ****     }
+  73              		.loc 1 106 0 discriminator 1
+  74 0010 FEFFFFEA 		b	.L2
+  75              		.cfi_endproc
+  76              	.LFE0:
+  78              		.section	.rodata
+  79              		.align	2
+  80              	.LC0:
+  81 0000 49325320 		.ascii	"I2S init failed %x\012\000"
+  81      696E6974 
+  81      20666169 
+  81      6C656420 
+  81      25780A00 
+  82              		.align	2
+  83              	.LC1:
+  84 0014 49325320 		.ascii	"I2S config failed %x\012\000"
+  84      636F6E66 
+  84      69672066 
+  84      61696C65 
+  84      64202578 
+  85              		.text
+  86              		.align	2
+  87              		.global	CyFxApplnI2SInit
+  89              	CyFxApplnI2SInit:
+  90              	.LFB1:
+ 107:../cyfxusbhost.c **** }
+ 108:../cyfxusbhost.c **** 
+ 109:../cyfxusbhost.c **** void CyFxApplnI2SInit() {
+  91              		.loc 1 109 0
+  92              		.cfi_startproc
+  93              		@ args = 0, pretend = 0, frame = 32
+  94              		@ frame_needed = 1, uses_anonymous_args = 0
+  95 0014 00482DE9 		stmfd	sp!, {fp, lr}
+  96              	.LCFI2:
+  97              		.cfi_def_cfa_offset 8
+  98 0018 04B08DE2 		add	fp, sp, #4
+  99              		.cfi_offset 14, -4
+ 100              		.cfi_offset 11, -8
+ 101              	.LCFI3:
+ 102              		.cfi_def_cfa 11, 4
+ 103 001c 20D04DE2 		sub	sp, sp, #32
+ 110:../cyfxusbhost.c **** 	CyU3PI2sConfig_t i2sConfig = {
+ 104              		.loc 1 110 0
+ 105 0020 78309FE5 		ldr	r3, .L6
+ 106 0024 20C04BE2 		sub	ip, fp, #32
+ 107 0028 03E0A0E1 		mov	lr, r3
+ 108 002c 0F00BEE8 		ldmia	lr!, {r0, r1, r2, r3}
+ 109 0030 0F00ACE8 		stmia	ip!, {r0, r1, r2, r3}
+ 110 0034 03009EE8 		ldmia	lr, {r0, r1}
+ 111 0038 03008CE8 		stmia	ip, {r0, r1}
+ 111:../cyfxusbhost.c **** 			CyFalse, CyFalse, CyTrue, CY_U3P_I2S_PAD_MODE_NORMAL, CY_U3P_I2S_SAMPLE_RATE_44_1KHz, CY_U3P_I2S
+ 112:../cyfxusbhost.c **** 	};
+ 113:../cyfxusbhost.c **** 	CyU3PReturnStatus_t status;
+ 114:../cyfxusbhost.c **** 
+ 115:../cyfxusbhost.c **** 	status = CyU3PI2sInit();
+ 112              		.loc 1 115 0
+ 113 003c FEFFFFEB 		bl	CyU3PI2sInit
+ 114 0040 08000BE5 		str	r0, [fp, #-8]
+ 116:../cyfxusbhost.c **** 	if(status) {
+ 115              		.loc 1 116 0
+ 116 0044 08301BE5 		ldr	r3, [fp, #-8]
+ 117 0048 000053E3 		cmp	r3, #0
+ 118 004c 0400000A 		beq	.L4
+ 117:../cyfxusbhost.c **** 		CyU3PDebugPrint(2, "I2S init failed %x\n", status);
+ 119              		.loc 1 117 0
+ 120 0050 0200A0E3 		mov	r0, #2
+ 121 0054 48109FE5 		ldr	r1, .L6+4
+ 122 0058 08201BE5 		ldr	r2, [fp, #-8]
+ 123 005c FEFFFFEB 		bl	CyU3PDebugPrint
+ 118:../cyfxusbhost.c **** 		return;
+ 124              		.loc 1 118 0
+ 125 0060 0C0000EA 		b	.L3
+ 126              	.L4:
+ 119:../cyfxusbhost.c **** 	}
+ 120:../cyfxusbhost.c **** 
+ 121:../cyfxusbhost.c **** 	status = CyU3PI2sSetConfig(&i2sConfig, NULL);
+ 127              		.loc 1 121 0
+ 128 0064 20304BE2 		sub	r3, fp, #32
+ 129 0068 0300A0E1 		mov	r0, r3
+ 130 006c 0010A0E3 		mov	r1, #0
+ 131 0070 FEFFFFEB 		bl	CyU3PI2sSetConfig
+ 132 0074 08000BE5 		str	r0, [fp, #-8]
+ 122:../cyfxusbhost.c **** 	if(status) {
+ 133              		.loc 1 122 0
+ 134 0078 08301BE5 		ldr	r3, [fp, #-8]
+ 135 007c 000053E3 		cmp	r3, #0
+ 136 0080 0400000A 		beq	.L3
+ 123:../cyfxusbhost.c **** 		CyU3PDebugPrint(2, "I2S config failed %x\n", status);
+ 137              		.loc 1 123 0
+ 138 0084 0200A0E3 		mov	r0, #2
+ 139 0088 18109FE5 		ldr	r1, .L6+8
+ 140 008c 08201BE5 		ldr	r2, [fp, #-8]
+ 141 0090 FEFFFFEB 		bl	CyU3PDebugPrint
+ 124:../cyfxusbhost.c **** 		return;
+ 142              		.loc 1 124 0
+ 143 0094 0000A0E1 		mov	r0, r0	@ nop
+ 144              	.L3:
+ 125:../cyfxusbhost.c **** 	}
+ 126:../cyfxusbhost.c **** 
+ 127:../cyfxusbhost.c **** }
+ 145              		.loc 1 127 0
+ 146 0098 04D04BE2 		sub	sp, fp, #4
+ 147 009c 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 148              	.L7:
+ 149              		.align	2
+ 150              	.L6:
+ 151 00a0 58010000 		.word	C.18.8639
+ 152 00a4 00000000 		.word	.LC0
+ 153 00a8 14000000 		.word	.LC1
+ 154              		.cfi_endproc
+ 155              	.LFE1:
+ 157              		.align	2
+ 158              		.global	CyFxApplnDebugInit
+ 160              	CyFxApplnDebugInit:
+ 161              	.LFB2:
+ 128:../cyfxusbhost.c **** 
+ 129:../cyfxusbhost.c **** /* This function initializes the debug module. The debug prints
+ 130:../cyfxusbhost.c ****  * are routed to the UART and can be seen using a UART console
+ 131:../cyfxusbhost.c ****  * running at 115200 baud rate. */
+ 132:../cyfxusbhost.c **** void
+ 133:../cyfxusbhost.c **** CyFxApplnDebugInit (void)
+ 134:../cyfxusbhost.c **** {
+ 162              		.loc 1 134 0
+ 163              		.cfi_startproc
+ 164              		@ args = 0, pretend = 0, frame = 32
+ 165              		@ frame_needed = 1, uses_anonymous_args = 0
+ 166 00ac 00482DE9 		stmfd	sp!, {fp, lr}
+ 167              	.LCFI4:
+ 168              		.cfi_def_cfa_offset 8
+ 169 00b0 04B08DE2 		add	fp, sp, #4
+ 170              		.cfi_offset 14, -4
+ 171              		.cfi_offset 11, -8
+ 172              	.LCFI5:
+ 173              		.cfi_def_cfa 11, 4
+ 174 00b4 20D04DE2 		sub	sp, sp, #32
+ 135:../cyfxusbhost.c ****     CyU3PUartConfig_t uartConfig;
+ 136:../cyfxusbhost.c ****     CyU3PReturnStatus_t apiRetStatus = CY_U3P_SUCCESS;
+ 175              		.loc 1 136 0
+ 176 00b8 0030A0E3 		mov	r3, #0
+ 177 00bc 08300BE5 		str	r3, [fp, #-8]
+ 137:../cyfxusbhost.c **** 
+ 138:../cyfxusbhost.c ****     /* Initialize the UART for printing debug messages */
+ 139:../cyfxusbhost.c ****     apiRetStatus = CyU3PUartInit();
+ 178              		.loc 1 139 0
+ 179 00c0 FEFFFFEB 		bl	CyU3PUartInit
+ 180 00c4 08000BE5 		str	r0, [fp, #-8]
+ 140:../cyfxusbhost.c ****     if (apiRetStatus != CY_U3P_SUCCESS)
+ 181              		.loc 1 140 0
+ 182 00c8 08301BE5 		ldr	r3, [fp, #-8]
+ 183 00cc 000053E3 		cmp	r3, #0
+ 184 00d0 0100000A 		beq	.L9
+ 141:../cyfxusbhost.c ****     {
+ 142:../cyfxusbhost.c ****         /* Error handling */
+ 143:../cyfxusbhost.c ****         CyFxAppErrorHandler(apiRetStatus);
+ 185              		.loc 1 143 0
+ 186 00d4 08001BE5 		ldr	r0, [fp, #-8]
+ 187 00d8 FEFFFFEB 		bl	CyFxAppErrorHandler
+ 188              	.L9:
+ 144:../cyfxusbhost.c ****     }
+ 145:../cyfxusbhost.c **** 
+ 146:../cyfxusbhost.c ****     /* Set UART configuration */
+ 147:../cyfxusbhost.c ****     CyU3PMemSet ((uint8_t *)&uartConfig, 0, sizeof (uartConfig));
+ 189              		.loc 1 147 0
+ 190 00dc 20304BE2 		sub	r3, fp, #32
+ 191 00e0 0300A0E1 		mov	r0, r3
+ 192 00e4 0010A0E3 		mov	r1, #0
+ 193 00e8 1820A0E3 		mov	r2, #24
+ 194 00ec FEFFFFEB 		bl	CyU3PMemSet
+ 148:../cyfxusbhost.c ****     uartConfig.baudRate = CY_U3P_UART_BAUDRATE_115200;
+ 195              		.loc 1 148 0
+ 196 00f0 AC309FE5 		ldr	r3, .L13
+ 197 00f4 10300BE5 		str	r3, [fp, #-16]
+ 149:../cyfxusbhost.c ****     uartConfig.stopBit = CY_U3P_UART_ONE_STOP_BIT;
+ 198              		.loc 1 149 0
+ 199 00f8 0130A0E3 		mov	r3, #1
+ 200 00fc 0C304BE5 		strb	r3, [fp, #-12]
+ 150:../cyfxusbhost.c ****     uartConfig.parity = CY_U3P_UART_NO_PARITY;
+ 201              		.loc 1 150 0
+ 202 0100 0030A0E3 		mov	r3, #0
+ 203 0104 0B304BE5 		strb	r3, [fp, #-11]
+ 151:../cyfxusbhost.c ****     uartConfig.txEnable = CyTrue;
+ 204              		.loc 1 151 0
+ 205 0108 0130A0E3 		mov	r3, #1
+ 206 010c 20300BE5 		str	r3, [fp, #-32]
+ 152:../cyfxusbhost.c ****     uartConfig.rxEnable = CyFalse;
+ 207              		.loc 1 152 0
+ 208 0110 0030A0E3 		mov	r3, #0
+ 209 0114 1C300BE5 		str	r3, [fp, #-28]
+ 153:../cyfxusbhost.c ****     uartConfig.flowCtrl = CyFalse;
+ 210              		.loc 1 153 0
+ 211 0118 0030A0E3 		mov	r3, #0
+ 212 011c 18300BE5 		str	r3, [fp, #-24]
+ 154:../cyfxusbhost.c ****     uartConfig.isDma = CyTrue;
+ 213              		.loc 1 154 0
+ 214 0120 0130A0E3 		mov	r3, #1
+ 215 0124 14300BE5 		str	r3, [fp, #-20]
+ 155:../cyfxusbhost.c **** 
+ 156:../cyfxusbhost.c ****     apiRetStatus = CyU3PUartSetConfig (&uartConfig, NULL);
+ 216              		.loc 1 156 0
+ 217 0128 20304BE2 		sub	r3, fp, #32
+ 218 012c 0300A0E1 		mov	r0, r3
+ 219 0130 0010A0E3 		mov	r1, #0
+ 220 0134 FEFFFFEB 		bl	CyU3PUartSetConfig
+ 221 0138 08000BE5 		str	r0, [fp, #-8]
+ 157:../cyfxusbhost.c ****     if (apiRetStatus != CY_U3P_SUCCESS)
+ 222              		.loc 1 157 0
+ 223 013c 08301BE5 		ldr	r3, [fp, #-8]
+ 224 0140 000053E3 		cmp	r3, #0
+ 225 0144 0100000A 		beq	.L10
+ 158:../cyfxusbhost.c ****     {
+ 159:../cyfxusbhost.c ****         CyFxAppErrorHandler(apiRetStatus);
+ 226              		.loc 1 159 0
+ 227 0148 08001BE5 		ldr	r0, [fp, #-8]
+ 228 014c FEFFFFEB 		bl	CyFxAppErrorHandler
+ 229              	.L10:
+ 160:../cyfxusbhost.c ****     }
+ 161:../cyfxusbhost.c **** 
+ 162:../cyfxusbhost.c ****     /* Set the UART transfer to a really large value. */
+ 163:../cyfxusbhost.c ****     apiRetStatus = CyU3PUartTxSetBlockXfer (0xFFFFFFFF);
+ 230              		.loc 1 163 0
+ 231 0150 0000E0E3 		mvn	r0, #0
+ 232 0154 FEFFFFEB 		bl	CyU3PUartTxSetBlockXfer
+ 233 0158 08000BE5 		str	r0, [fp, #-8]
+ 164:../cyfxusbhost.c ****     if (apiRetStatus != CY_U3P_SUCCESS)
+ 234              		.loc 1 164 0
+ 235 015c 08301BE5 		ldr	r3, [fp, #-8]
+ 236 0160 000053E3 		cmp	r3, #0
+ 237 0164 0100000A 		beq	.L11
+ 165:../cyfxusbhost.c ****     {
+ 166:../cyfxusbhost.c ****         CyFxAppErrorHandler(apiRetStatus);
+ 238              		.loc 1 166 0
+ 239 0168 08001BE5 		ldr	r0, [fp, #-8]
+ 240 016c FEFFFFEB 		bl	CyFxAppErrorHandler
+ 241              	.L11:
+ 167:../cyfxusbhost.c ****     }
+ 168:../cyfxusbhost.c **** 
+ 169:../cyfxusbhost.c ****     /* Initialize the debug module. */
+ 170:../cyfxusbhost.c ****     apiRetStatus = CyU3PDebugInit (CY_U3P_LPP_SOCKET_UART_CONS, 8);
+ 242              		.loc 1 170 0
+ 243 0170 0300A0E3 		mov	r0, #3
+ 244 0174 0810A0E3 		mov	r1, #8
+ 245 0178 FEFFFFEB 		bl	CyU3PDebugInit
+ 246 017c 08000BE5 		str	r0, [fp, #-8]
+ 171:../cyfxusbhost.c ****     if (apiRetStatus != CY_U3P_SUCCESS)
+ 247              		.loc 1 171 0
+ 248 0180 08301BE5 		ldr	r3, [fp, #-8]
+ 249 0184 000053E3 		cmp	r3, #0
+ 250 0188 0100000A 		beq	.L12
+ 172:../cyfxusbhost.c ****     {
+ 173:../cyfxusbhost.c ****         CyFxAppErrorHandler(apiRetStatus);
+ 251              		.loc 1 173 0
+ 252 018c 08001BE5 		ldr	r0, [fp, #-8]
+ 253 0190 FEFFFFEB 		bl	CyFxAppErrorHandler
+ 254              	.L12:
+ 174:../cyfxusbhost.c ****     }
+ 175:../cyfxusbhost.c **** 
+ 176:../cyfxusbhost.c ****     CyU3PDebugPreamble (CyFalse);
+ 255              		.loc 1 176 0
+ 256 0194 0000A0E3 		mov	r0, #0
+ 257 0198 FEFFFFEB 		bl	CyU3PDebugPreamble
+ 177:../cyfxusbhost.c **** }
+ 258              		.loc 1 177 0
+ 259 019c 04D04BE2 		sub	sp, fp, #4
+ 260 01a0 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 261              	.L14:
+ 262              		.align	2
+ 263              	.L13:
+ 264 01a4 00C20100 		.word	115200
+ 265              		.cfi_endproc
+ 266              	.LFE2:
+ 268              		.section	.rodata
+ 269 002a 0000     		.align	2
+ 270              	.LC2:
+ 271 002c 486F7374 		.ascii	"Host event callback: %d %d\012\000"
+ 271      20657665 
+ 271      6E742063 
+ 271      616C6C62 
+ 271      61636B3A 
+ 272              		.text
+ 273              		.align	2
+ 274              		.global	CyFxHostEventCb
+ 276              	CyFxHostEventCb:
+ 277              	.LFB3:
+ 178:../cyfxusbhost.c **** 
+ 179:../cyfxusbhost.c **** /* USB host stack event callback function. */
+ 180:../cyfxusbhost.c **** void
+ 181:../cyfxusbhost.c **** CyFxHostEventCb (CyU3PUsbHostEventType_t evType, uint32_t evData)
+ 182:../cyfxusbhost.c **** {
+ 278              		.loc 1 182 0
+ 279              		.cfi_startproc
+ 280              		@ args = 0, pretend = 0, frame = 8
+ 281              		@ frame_needed = 1, uses_anonymous_args = 0
+ 282 01a8 00482DE9 		stmfd	sp!, {fp, lr}
+ 283              	.LCFI6:
+ 284              		.cfi_def_cfa_offset 8
+ 285 01ac 04B08DE2 		add	fp, sp, #4
+ 286              		.cfi_offset 14, -4
+ 287              		.cfi_offset 11, -8
+ 288              	.LCFI7:
+ 289              		.cfi_def_cfa 11, 4
+ 290 01b0 08D04DE2 		sub	sp, sp, #8
+ 291 01b4 0030A0E1 		mov	r3, r0
+ 292 01b8 0C100BE5 		str	r1, [fp, #-12]
+ 293 01bc 05304BE5 		strb	r3, [fp, #-5]
+ 183:../cyfxusbhost.c **** 	CyU3PDebugPrint(2, "Host event callback: %d %d\n", evType, evData);
+ 294              		.loc 1 183 0
+ 295 01c0 05305BE5 		ldrb	r3, [fp, #-5]	@ zero_extendqisi2
+ 296 01c4 0200A0E3 		mov	r0, #2
+ 297 01c8 38109FE5 		ldr	r1, .L18
+ 298 01cc 0320A0E1 		mov	r2, r3
+ 299 01d0 0C301BE5 		ldr	r3, [fp, #-12]
+ 300 01d4 FEFFFFEB 		bl	CyU3PDebugPrint
+ 184:../cyfxusbhost.c ****     /* This is connect / disconnect event. Log it so that the
+ 185:../cyfxusbhost.c ****      * application thread can handle it. */
+ 186:../cyfxusbhost.c ****     if (evType == CY_U3P_USB_HOST_EVENT_CONNECT)
+ 301              		.loc 1 186 0
+ 302 01d8 05305BE5 		ldrb	r3, [fp, #-5]	@ zero_extendqisi2
+ 303 01dc 000053E3 		cmp	r3, #0
+ 304 01e0 0300001A 		bne	.L16
+ 187:../cyfxusbhost.c ****     {
+ 188:../cyfxusbhost.c ****         glIsPeripheralPresent = CyTrue;
+ 305              		.loc 1 188 0
+ 306 01e4 20309FE5 		ldr	r3, .L18+4
+ 307 01e8 0120A0E3 		mov	r2, #1
+ 308 01ec 002083E5 		str	r2, [r3, #0]
+ 309 01f0 020000EA 		b	.L15
+ 310              	.L16:
+ 189:../cyfxusbhost.c ****     }
+ 190:../cyfxusbhost.c ****     else
+ 191:../cyfxusbhost.c ****     {
+ 192:../cyfxusbhost.c ****     	//CyU3PDebugPrint (2, "DISCONNECT EVENT.\r\n");
+ 193:../cyfxusbhost.c ****         glIsPeripheralPresent = CyFalse;
+ 311              		.loc 1 193 0
+ 312 01f4 10309FE5 		ldr	r3, .L18+4
+ 313 01f8 0020A0E3 		mov	r2, #0
+ 314 01fc 002083E5 		str	r2, [r3, #0]
+ 315              	.L15:
+ 194:../cyfxusbhost.c ****     }
+ 195:../cyfxusbhost.c **** }
+ 316              		.loc 1 195 0
+ 317 0200 04D04BE2 		sub	sp, fp, #4
+ 318 0204 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 319              	.L19:
+ 320              		.align	2
+ 321              	.L18:
+ 322 0208 2C000000 		.word	.LC2
+ 323 020c 00000000 		.word	glIsPeripheralPresent
+ 324              		.cfi_endproc
+ 325              	.LFE3:
+ 327              		.section	.rodata
+ 328              		.align	2
+ 329              	.LC3:
+ 330 0048 45503020 		.ascii	"EP0 status is %d\015\012\000"
+ 330      73746174 
+ 330      75732069 
+ 330      73202564 
+ 330      0D0A00
+ 331              		.text
+ 332              		.align	2
+ 333              		.global	CyFxSendSetupRqt
+ 335              	CyFxSendSetupRqt:
+ 336              	.LFB4:
+ 196:../cyfxusbhost.c **** 
+ 197:../cyfxusbhost.c **** /* Helper function to send EP0 setup packet. */
+ 198:../cyfxusbhost.c **** CyU3PReturnStatus_t
+ 199:../cyfxusbhost.c **** CyFxSendSetupRqt (
+ 200:../cyfxusbhost.c ****         uint8_t type,
+ 201:../cyfxusbhost.c ****         uint8_t request,
+ 202:../cyfxusbhost.c ****         uint16_t value,
+ 203:../cyfxusbhost.c ****         uint16_t index,
+ 204:../cyfxusbhost.c ****         uint16_t length,
+ 205:../cyfxusbhost.c ****         uint8_t *buffer_p)
+ 206:../cyfxusbhost.c **** {
+ 337              		.loc 1 206 0
+ 338              		.cfi_startproc
+ 339              		@ args = 8, pretend = 0, frame = 16
+ 340              		@ frame_needed = 1, uses_anonymous_args = 0
+ 341 0210 00482DE9 		stmfd	sp!, {fp, lr}
+ 342              	.LCFI8:
+ 343              		.cfi_def_cfa_offset 8
+ 344 0214 04B08DE2 		add	fp, sp, #4
+ 345              		.cfi_offset 14, -4
+ 346              		.cfi_offset 11, -8
+ 347              	.LCFI9:
+ 348              		.cfi_def_cfa 11, 4
+ 349 0218 10D04DE2 		sub	sp, sp, #16
+ 350 021c 0D004BE5 		strb	r0, [fp, #-13]
+ 351 0220 0E104BE5 		strb	r1, [fp, #-14]
+ 352 0224 B0214BE1 		strh	r2, [fp, #-16]	@ movhi
+ 353 0228 B2314BE1 		strh	r3, [fp, #-18]	@ movhi
+ 207:../cyfxusbhost.c ****     CyU3PUsbHostEpStatus_t epStatus;
+ 208:../cyfxusbhost.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 354              		.loc 1 208 0
+ 355 022c 0030A0E3 		mov	r3, #0
+ 356 0230 08300BE5 		str	r3, [fp, #-8]
+ 209:../cyfxusbhost.c **** 
+ 210:../cyfxusbhost.c ****     glSetupPkt[0] = type;
+ 357              		.loc 1 210 0
+ 358 0234 04319FE5 		ldr	r3, .L24
+ 359 0238 0D205BE5 		ldrb	r2, [fp, #-13]
+ 360 023c 0020C3E5 		strb	r2, [r3, #0]
+ 211:../cyfxusbhost.c ****     glSetupPkt[1] = request;
+ 361              		.loc 1 211 0
+ 362 0240 F8309FE5 		ldr	r3, .L24
+ 363 0244 0E205BE5 		ldrb	r2, [fp, #-14]
+ 364 0248 0120C3E5 		strb	r2, [r3, #1]
+ 212:../cyfxusbhost.c ****     glSetupPkt[2] = CY_U3P_GET_LSB(value);
+ 365              		.loc 1 212 0
+ 366 024c B0315BE1 		ldrh	r3, [fp, #-16]	@ movhi
+ 367 0250 FF2003E2 		and	r2, r3, #255
+ 368 0254 E4309FE5 		ldr	r3, .L24
+ 369 0258 0220C3E5 		strb	r2, [r3, #2]
+ 213:../cyfxusbhost.c ****     glSetupPkt[3] = CY_U3P_GET_MSB(value);
+ 370              		.loc 1 213 0
+ 371 025c B0315BE1 		ldrh	r3, [fp, #-16]
+ 372 0260 2334A0E1 		mov	r3, r3, lsr #8
+ 373 0264 0338A0E1 		mov	r3, r3, asl #16
+ 374 0268 2338A0E1 		mov	r3, r3, lsr #16
+ 375 026c FF2003E2 		and	r2, r3, #255
+ 376 0270 C8309FE5 		ldr	r3, .L24
+ 377 0274 0320C3E5 		strb	r2, [r3, #3]
+ 214:../cyfxusbhost.c ****     glSetupPkt[4] = CY_U3P_GET_LSB(index);
+ 378              		.loc 1 214 0
+ 379 0278 B2315BE1 		ldrh	r3, [fp, #-18]	@ movhi
+ 380 027c FF2003E2 		and	r2, r3, #255
+ 381 0280 B8309FE5 		ldr	r3, .L24
+ 382 0284 0420C3E5 		strb	r2, [r3, #4]
+ 215:../cyfxusbhost.c ****     glSetupPkt[5] = CY_U3P_GET_MSB(index);
+ 383              		.loc 1 215 0
+ 384 0288 B2315BE1 		ldrh	r3, [fp, #-18]
+ 385 028c 2334A0E1 		mov	r3, r3, lsr #8
+ 386 0290 0338A0E1 		mov	r3, r3, asl #16
+ 387 0294 2338A0E1 		mov	r3, r3, lsr #16
+ 388 0298 FF2003E2 		and	r2, r3, #255
+ 389 029c 9C309FE5 		ldr	r3, .L24
+ 390 02a0 0520C3E5 		strb	r2, [r3, #5]
+ 216:../cyfxusbhost.c ****     glSetupPkt[6] = CY_U3P_GET_LSB(length);
+ 391              		.loc 1 216 0
+ 392 02a4 B430DBE1 		ldrh	r3, [fp, #4]	@ movhi
+ 393 02a8 FF2003E2 		and	r2, r3, #255
+ 394 02ac 8C309FE5 		ldr	r3, .L24
+ 395 02b0 0620C3E5 		strb	r2, [r3, #6]
+ 217:../cyfxusbhost.c ****     glSetupPkt[7] = CY_U3P_GET_MSB(length);
+ 396              		.loc 1 217 0
+ 397 02b4 B430DBE1 		ldrh	r3, [fp, #4]
+ 398 02b8 2334A0E1 		mov	r3, r3, lsr #8
+ 399 02bc 0338A0E1 		mov	r3, r3, asl #16
+ 400 02c0 2338A0E1 		mov	r3, r3, lsr #16
+ 401 02c4 FF2003E2 		and	r2, r3, #255
+ 402 02c8 70309FE5 		ldr	r3, .L24
+ 403 02cc 0720C3E5 		strb	r2, [r3, #7]
+ 218:../cyfxusbhost.c **** 
+ 219:../cyfxusbhost.c ****     status = CyU3PUsbHostSendSetupRqt (glSetupPkt, buffer_p);
+ 404              		.loc 1 219 0
+ 405 02d0 68009FE5 		ldr	r0, .L24
+ 406 02d4 08109BE5 		ldr	r1, [fp, #8]
+ 407 02d8 FEFFFFEB 		bl	CyU3PUsbHostSendSetupRqt
+ 408 02dc 08000BE5 		str	r0, [fp, #-8]
+ 220:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 409              		.loc 1 220 0
+ 410 02e0 08301BE5 		ldr	r3, [fp, #-8]
+ 411 02e4 000053E3 		cmp	r3, #0
+ 412 02e8 0100000A 		beq	.L21
+ 221:../cyfxusbhost.c ****     {
+ 222:../cyfxusbhost.c ****         return status;
+ 413              		.loc 1 222 0
+ 414 02ec 08301BE5 		ldr	r3, [fp, #-8]
+ 415 02f0 0F0000EA 		b	.L22
+ 416              	.L21:
+ 223:../cyfxusbhost.c ****     }
+ 224:../cyfxusbhost.c ****     status = CyU3PUsbHostEpWaitForCompletion (0, &epStatus,
+ 417              		.loc 1 224 0
+ 418 02f4 0C304BE2 		sub	r3, fp, #12
+ 419 02f8 0000A0E3 		mov	r0, #0
+ 420 02fc 0310A0E1 		mov	r1, r3
+ 421 0300 3C209FE5 		ldr	r2, .L24+4
+ 422 0304 FEFFFFEB 		bl	CyU3PUsbHostEpWaitForCompletion
+ 423 0308 08000BE5 		str	r0, [fp, #-8]
+ 225:../cyfxusbhost.c ****             CY_FX_HOST_EP0_WAIT_TIMEOUT);
+ 226:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 424              		.loc 1 226 0
+ 425 030c 08301BE5 		ldr	r3, [fp, #-8]
+ 426 0310 000053E3 		cmp	r3, #0
+ 427 0314 0300000A 		beq	.L23
+ 227:../cyfxusbhost.c ****     	CyU3PDebugPrint (2, "EP0 status is %d\r\n", status);
+ 428              		.loc 1 227 0
+ 429 0318 0200A0E3 		mov	r0, #2
+ 430 031c 24109FE5 		ldr	r1, .L24+8
+ 431 0320 08201BE5 		ldr	r2, [fp, #-8]
+ 432 0324 FEFFFFEB 		bl	CyU3PDebugPrint
+ 433              	.L23:
+ 228:../cyfxusbhost.c **** 
+ 229:../cyfxusbhost.c ****     CyU3PThreadSleep (10);
+ 434              		.loc 1 229 0
+ 435 0328 0A00A0E3 		mov	r0, #10
+ 436 032c FEFFFFEB 		bl	_tx_thread_sleep
+ 230:../cyfxusbhost.c **** 
+ 231:../cyfxusbhost.c ****     return status;
+ 437              		.loc 1 231 0
+ 438 0330 08301BE5 		ldr	r3, [fp, #-8]
+ 439              	.L22:
+ 232:../cyfxusbhost.c **** }
+ 440              		.loc 1 232 0
+ 441 0334 0300A0E1 		mov	r0, r3
+ 442 0338 04D04BE2 		sub	sp, fp, #4
+ 443 033c 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 444              	.L25:
+ 445              		.align	2
+ 446              	.L24:
+ 447 0340 00000000 		.word	glSetupPkt
+ 448 0344 88130000 		.word	5000
+ 449 0348 48000000 		.word	.LC3
+ 450              		.cfi_endproc
+ 451              	.LFE4:
+ 453              		.section	.rodata
+ 454 005b 00       		.align	2
+ 455              	.LC4:
+ 456 005c 56494420 		.ascii	"VID %x,PID %x \015\012\000"
+ 456      25782C50 
+ 456      49442025 
+ 456      78200D0A 
+ 456      00
+ 457 006d 000000   		.align	2
+ 458              	.LC5:
+ 459 0070 496E2041 		.ascii	"In AOA Start\015\012\000"
+ 459      4F412053 
+ 459      74617274 
+ 459      0D0A00
+ 460 007f 00       		.align	2
+ 461              	.LC6:
+ 462 0080 4170706C 		.ascii	"Application start failed with error: %d.\015\012\000"
+ 462      69636174 
+ 462      696F6E20 
+ 462      73746172 
+ 462      74206661 
+ 463              		.text
+ 464              		.align	2
+ 465              		.global	CyFxApplnStart
+ 467              	CyFxApplnStart:
+ 468              	.LFB5:
+ 233:../cyfxusbhost.c **** 
+ 234:../cyfxusbhost.c **** 
+ 235:../cyfxusbhost.c **** /* This function initializes the mouse driver application. */
+ 236:../cyfxusbhost.c **** void
+ 237:../cyfxusbhost.c **** CyFxApplnStart ()
+ 238:../cyfxusbhost.c **** {
+ 469              		.loc 1 238 0
+ 470              		.cfi_startproc
+ 471              		@ args = 0, pretend = 0, frame = 24
+ 472              		@ frame_needed = 1, uses_anonymous_args = 0
+ 473 034c 00482DE9 		stmfd	sp!, {fp, lr}
+ 474              	.LCFI10:
+ 475              		.cfi_def_cfa_offset 8
+ 476 0350 04B08DE2 		add	fp, sp, #4
+ 477              		.cfi_offset 14, -4
+ 478              		.cfi_offset 11, -8
+ 479              	.LCFI11:
+ 480              		.cfi_def_cfa 11, 4
+ 481 0354 20D04DE2 		sub	sp, sp, #32
+ 239:../cyfxusbhost.c ****     uint16_t vid,pid,pid_tmp;
+ 240:../cyfxusbhost.c ****     CyU3PReturnStatus_t status;
+ 241:../cyfxusbhost.c ****     CyU3PUsbHostEpConfig_t epCfg;
+ 242:../cyfxusbhost.c **** 
+ 243:../cyfxusbhost.c ****     /* Add EP0 to the scheduler. */
+ 244:../cyfxusbhost.c ****     CyU3PMemSet ((uint8_t *)&epCfg, 0, sizeof(epCfg));
+ 482              		.loc 1 244 0
+ 483 0358 1C304BE2 		sub	r3, fp, #28
+ 484 035c 0300A0E1 		mov	r0, r3
+ 485 0360 0010A0E3 		mov	r1, #0
+ 486 0364 0C20A0E3 		mov	r2, #12
+ 487 0368 FEFFFFEB 		bl	CyU3PMemSet
+ 245:../cyfxusbhost.c ****     epCfg.type = CY_U3P_USB_EP_CONTROL;
+ 488              		.loc 1 245 0
+ 489 036c 0030A0E3 		mov	r3, #0
+ 490 0370 1C304BE5 		strb	r3, [fp, #-28]
+ 246:../cyfxusbhost.c ****     epCfg.mult = 1;
+ 491              		.loc 1 246 0
+ 492 0374 0130A0E3 		mov	r3, #1
+ 493 0378 1B304BE5 		strb	r3, [fp, #-27]
+ 247:../cyfxusbhost.c ****     /* Start off with 8 byte EP0 packet size. */
+ 248:../cyfxusbhost.c ****     epCfg.maxPktSize = 8;
+ 494              		.loc 1 248 0
+ 495 037c 0830A0E3 		mov	r3, #8
+ 496 0380 BA314BE1 		strh	r3, [fp, #-26]	@ movhi
+ 249:../cyfxusbhost.c ****     epCfg.pollingRate = 0;
+ 497              		.loc 1 249 0
+ 498 0384 0030A0E3 		mov	r3, #0
+ 499 0388 18304BE5 		strb	r3, [fp, #-24]
+ 250:../cyfxusbhost.c ****     epCfg.fullPktSize = 8;
+ 500              		.loc 1 250 0
+ 501 038c 0830A0E3 		mov	r3, #8
+ 502 0390 B6314BE1 		strh	r3, [fp, #-22]	@ movhi
+ 251:../cyfxusbhost.c ****     epCfg.isStreamMode = CyFalse;
+ 503              		.loc 1 251 0
+ 504 0394 0030A0E3 		mov	r3, #0
+ 505 0398 14300BE5 		str	r3, [fp, #-20]
+ 252:../cyfxusbhost.c ****     status = CyU3PUsbHostEpAdd (0, &epCfg);
+ 506              		.loc 1 252 0
+ 507 039c 1C304BE2 		sub	r3, fp, #28
+ 508 03a0 0000A0E3 		mov	r0, #0
+ 509 03a4 0310A0E1 		mov	r1, r3
+ 510 03a8 FEFFFFEB 		bl	CyU3PUsbHostEpAdd
+ 511 03ac 08000BE5 		str	r0, [fp, #-8]
+ 253:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 512              		.loc 1 253 0
+ 513 03b0 08301BE5 		ldr	r3, [fp, #-8]
+ 514 03b4 000053E3 		cmp	r3, #0
+ 515 03b8 8600001A 		bne	.L37
+ 516              	.L27:
+ 254:../cyfxusbhost.c ****     {
+ 255:../cyfxusbhost.c ****         goto enum_error;
+ 256:../cyfxusbhost.c ****     }
+ 257:../cyfxusbhost.c **** 
+ 258:../cyfxusbhost.c ****     CyU3PThreadSleep (100);
+ 517              		.loc 1 258 0
+ 518 03bc 6400A0E3 		mov	r0, #100
+ 519 03c0 FEFFFFEB 		bl	_tx_thread_sleep
+ 259:../cyfxusbhost.c **** 
+ 260:../cyfxusbhost.c ****     /* Get the device descriptor. */
+ 261:../cyfxusbhost.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 520              		.loc 1 261 0
+ 521 03c4 0830A0E3 		mov	r3, #8
+ 522 03c8 00308DE5 		str	r3, [sp, #0]
+ 523 03cc 68329FE5 		ldr	r3, .L44
+ 524 03d0 04308DE5 		str	r3, [sp, #4]
+ 525 03d4 8000A0E3 		mov	r0, #128
+ 526 03d8 0610A0E3 		mov	r1, #6
+ 527 03dc 012CA0E3 		mov	r2, #256
+ 528 03e0 0030A0E3 		mov	r3, #0
+ 529 03e4 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 530 03e8 08000BE5 		str	r0, [fp, #-8]
+ 262:../cyfxusbhost.c ****             (CY_U3P_USB_DEVICE_DESCR << 8), 0, 8, glEp0Buffer);
+ 263:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 531              		.loc 1 263 0
+ 532 03ec 08301BE5 		ldr	r3, [fp, #-8]
+ 533 03f0 000053E3 		cmp	r3, #0
+ 534 03f4 7900001A 		bne	.L38
+ 535              	.L29:
+ 264:../cyfxusbhost.c ****     {
+ 265:../cyfxusbhost.c ****         goto enum_error;
+ 266:../cyfxusbhost.c ****     }
+ 267:../cyfxusbhost.c **** 
+ 268:../cyfxusbhost.c ****     /* Identify the EP0 packet size and update the scheduler. */
+ 269:../cyfxusbhost.c ****     if (glEp0Buffer[7] != 8)
+ 536              		.loc 1 269 0
+ 537 03f8 3C329FE5 		ldr	r3, .L44
+ 538 03fc 0730D3E5 		ldrb	r3, [r3, #7]	@ zero_extendqisi2
+ 539 0400 080053E3 		cmp	r3, #8
+ 540 0404 0F00000A 		beq	.L30
+ 270:../cyfxusbhost.c ****     {
+ 271:../cyfxusbhost.c ****         CyU3PUsbHostEpRemove (0);
+ 541              		.loc 1 271 0
+ 542 0408 0000A0E3 		mov	r0, #0
+ 543 040c FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 272:../cyfxusbhost.c ****         epCfg.maxPktSize = glEp0Buffer[7];
+ 544              		.loc 1 272 0
+ 545 0410 24329FE5 		ldr	r3, .L44
+ 546 0414 0730D3E5 		ldrb	r3, [r3, #7]	@ zero_extendqisi2
+ 547 0418 BA314BE1 		strh	r3, [fp, #-26]	@ movhi
+ 273:../cyfxusbhost.c ****         epCfg.fullPktSize = glEp0Buffer[7];
+ 548              		.loc 1 273 0
+ 549 041c 18329FE5 		ldr	r3, .L44
+ 550 0420 0730D3E5 		ldrb	r3, [r3, #7]	@ zero_extendqisi2
+ 551 0424 B6314BE1 		strh	r3, [fp, #-22]	@ movhi
+ 274:../cyfxusbhost.c ****         status = CyU3PUsbHostEpAdd (0, &epCfg);
+ 552              		.loc 1 274 0
+ 553 0428 1C304BE2 		sub	r3, fp, #28
+ 554 042c 0000A0E3 		mov	r0, #0
+ 555 0430 0310A0E1 		mov	r1, r3
+ 556 0434 FEFFFFEB 		bl	CyU3PUsbHostEpAdd
+ 557 0438 08000BE5 		str	r0, [fp, #-8]
+ 275:../cyfxusbhost.c ****         if (status != CY_U3P_SUCCESS)
+ 558              		.loc 1 275 0
+ 559 043c 08301BE5 		ldr	r3, [fp, #-8]
+ 560 0440 000053E3 		cmp	r3, #0
+ 561 0444 6700001A 		bne	.L39
+ 562              	.L30:
+ 276:../cyfxusbhost.c ****         {
+ 277:../cyfxusbhost.c ****             goto enum_error;
+ 278:../cyfxusbhost.c ****         }
+ 279:../cyfxusbhost.c ****     }
+ 280:../cyfxusbhost.c **** 
+ 281:../cyfxusbhost.c ****     /* Read the full device descriptor. */
+ 282:../cyfxusbhost.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 563              		.loc 1 282 0
+ 564 0448 1230A0E3 		mov	r3, #18
+ 565 044c 00308DE5 		str	r3, [sp, #0]
+ 566 0450 E4319FE5 		ldr	r3, .L44
+ 567 0454 04308DE5 		str	r3, [sp, #4]
+ 568 0458 8000A0E3 		mov	r0, #128
+ 569 045c 0610A0E3 		mov	r1, #6
+ 570 0460 012CA0E3 		mov	r2, #256
+ 571 0464 0030A0E3 		mov	r3, #0
+ 572 0468 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 573 046c 08000BE5 		str	r0, [fp, #-8]
+ 283:../cyfxusbhost.c ****             (CY_U3P_USB_DEVICE_DESCR << 8), 0, 18, glEp0Buffer);
+ 284:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 574              		.loc 1 284 0
+ 575 0470 08301BE5 		ldr	r3, [fp, #-8]
+ 576 0474 000053E3 		cmp	r3, #0
+ 577 0478 5C00001A 		bne	.L40
+ 578              	.L31:
+ 285:../cyfxusbhost.c ****     {
+ 286:../cyfxusbhost.c ****         goto enum_error;
+ 287:../cyfxusbhost.c ****     }
+ 288:../cyfxusbhost.c **** 
+ 289:../cyfxusbhost.c ****     /* Set the peripheral device address. */
+ 290:../cyfxusbhost.c ****     status = CyFxSendSetupRqt (0x00, CY_U3P_USB_SC_SET_ADDRESS,
+ 579              		.loc 1 290 0
+ 580 047c 0030A0E3 		mov	r3, #0
+ 581 0480 00308DE5 		str	r3, [sp, #0]
+ 582 0484 B0319FE5 		ldr	r3, .L44
+ 583 0488 04308DE5 		str	r3, [sp, #4]
+ 584 048c 0000A0E3 		mov	r0, #0
+ 585 0490 0510A0E3 		mov	r1, #5
+ 586 0494 0120A0E3 		mov	r2, #1
+ 587 0498 0030A0E3 		mov	r3, #0
+ 588 049c FEFFFFEB 		bl	CyFxSendSetupRqt
+ 589 04a0 08000BE5 		str	r0, [fp, #-8]
+ 291:../cyfxusbhost.c ****             CY_FX_HOST_PERIPHERAL_ADDRESS, 0, 0, glEp0Buffer);
+ 292:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 590              		.loc 1 292 0
+ 591 04a4 08301BE5 		ldr	r3, [fp, #-8]
+ 592 04a8 000053E3 		cmp	r3, #0
+ 593 04ac 5100001A 		bne	.L41
+ 594              	.L32:
+ 293:../cyfxusbhost.c ****     {
+ 294:../cyfxusbhost.c ****         goto enum_error;
+ 295:../cyfxusbhost.c ****     }
+ 296:../cyfxusbhost.c ****     status = CyU3PUsbHostSetDeviceAddress (CY_FX_HOST_PERIPHERAL_ADDRESS);
+ 595              		.loc 1 296 0
+ 596 04b0 0100A0E3 		mov	r0, #1
+ 597 04b4 FEFFFFEB 		bl	CyU3PUsbHostSetDeviceAddress
+ 598 04b8 08000BE5 		str	r0, [fp, #-8]
+ 297:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 599              		.loc 1 297 0
+ 600 04bc 08301BE5 		ldr	r3, [fp, #-8]
+ 601 04c0 000053E3 		cmp	r3, #0
+ 602 04c4 4D00001A 		bne	.L42
+ 603              	.L33:
+ 298:../cyfxusbhost.c ****     {
+ 299:../cyfxusbhost.c ****         goto enum_error;
+ 300:../cyfxusbhost.c ****     }
+ 301:../cyfxusbhost.c **** #if 0
+ 302:../cyfxusbhost.c ****     /* Read first four bytes of configuration descriptor to determine
+ 303:../cyfxusbhost.c ****      * the total length. */
+ 304:../cyfxusbhost.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 305:../cyfxusbhost.c ****             (CY_U3P_USB_CONFIG_DESCR << 8), 0, 4, glEp0Buffer);
+ 306:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 307:../cyfxusbhost.c ****     {
+ 308:../cyfxusbhost.c ****         goto enum_error;
+ 309:../cyfxusbhost.c ****     }
+ 310:../cyfxusbhost.c **** 
+ 311:../cyfxusbhost.c **** 
+ 312:../cyfxusbhost.c ****     /* Identify the length of the data received. */
+ 313:../cyfxusbhost.c ****     length = CY_U3P_MAKEWORD(glEp0Buffer[3], glEp0Buffer[2]);
+ 314:../cyfxusbhost.c ****     if (length > CY_FX_HOST_EP0_BUFFER_SIZE)
+ 315:../cyfxusbhost.c ****     {
+ 316:../cyfxusbhost.c ****         goto enum_error;
+ 317:../cyfxusbhost.c ****     }
+ 318:../cyfxusbhost.c **** 
+ 319:../cyfxusbhost.c ****     /* Read the full configuration descriptor. */
+ 320:../cyfxusbhost.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 321:../cyfxusbhost.c ****             (CY_U3P_USB_CONFIG_DESCR << 8), 0, length, glEp0Buffer);
+ 322:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 323:../cyfxusbhost.c ****     {
+ 324:../cyfxusbhost.c ****         goto enum_error;
+ 325:../cyfxusbhost.c ****     }
+ 326:../cyfxusbhost.c **** 
+ 327:../cyfxusbhost.c **** 
+ 328:../cyfxusbhost.c ****     /* Identify if this is an HID mouse or MSC device that can be
+ 329:../cyfxusbhost.c ****      * supported. If the device cannot be supported, just disable
+ 330:../cyfxusbhost.c ****      * the port and wait for a new device to be attached. We support
+ 331:../cyfxusbhost.c ****      * only single interface with interface class = HID(0x03),
+ 332:../cyfxusbhost.c ****      * interface sub class = Boot (0x01) 
+ 333:../cyfxusbhost.c ****      * and interface protocol = Mouse (0x02).
+ 334:../cyfxusbhost.c ****      * or single interface with interface class = MSC(0x08),
+ 335:../cyfxusbhost.c ****      * interface sub class 0x06 and interface protocol BOT (0x50). */
+ 336:../cyfxusbhost.c ****     if ((glEp0Buffer[5] == 1) && (glEp0Buffer[14] == 0x03) &&
+ 337:../cyfxusbhost.c ****             (glEp0Buffer[15] == 0x01) && (glEp0Buffer[16] == 0x02) &&
+ 338:../cyfxusbhost.c ****             (glEp0Buffer[28] == CY_U3P_USB_ENDPNT_DESCR))
+ 339:../cyfxusbhost.c ****     {
+ 340:../cyfxusbhost.c ****         status = CyFxMouseDriverInit ();
+ 341:../cyfxusbhost.c ****         if (status == CY_U3P_SUCCESS)
+ 342:../cyfxusbhost.c ****         {
+ 343:../cyfxusbhost.c ****             glIsApplnActive = CyTrue;
+ 344:../cyfxusbhost.c ****             glHostOwner = CY_FX_HOST_OWNER_MOUSE_DRIVER;
+ 345:../cyfxusbhost.c ****             return;
+ 346:../cyfxusbhost.c ****         }
+ 347:../cyfxusbhost.c ****     }
+ 348:../cyfxusbhost.c ****     else if ((glEp0Buffer[5] == 1) && (glEp0Buffer[14] == 0x08) &&
+ 349:../cyfxusbhost.c ****             (glEp0Buffer[15] == 0x06) && (glEp0Buffer[16] == 0x50))
+ 350:../cyfxusbhost.c ****     {
+ 351:../cyfxusbhost.c ****         status = CyFxMscDriverInit ();
+ 352:../cyfxusbhost.c ****         if (status == CY_U3P_SUCCESS)
+ 353:../cyfxusbhost.c ****         {
+ 354:../cyfxusbhost.c ****             glIsApplnActive = CyTrue;
+ 355:../cyfxusbhost.c ****             glHostOwner = CY_FX_HOST_OWNER_MSC_DRIVER;
+ 356:../cyfxusbhost.c ****             return;
+ 357:../cyfxusbhost.c ****         }
+ 358:../cyfxusbhost.c ****     }
+ 359:../cyfxusbhost.c **** #endif
+ 360:../cyfxusbhost.c ****     /* Read the full device descriptor. */
+ 361:../cyfxusbhost.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 604              		.loc 1 361 0
+ 605 04c8 1230A0E3 		mov	r3, #18
+ 606 04cc 00308DE5 		str	r3, [sp, #0]
+ 607 04d0 64319FE5 		ldr	r3, .L44
+ 608 04d4 04308DE5 		str	r3, [sp, #4]
+ 609 04d8 8000A0E3 		mov	r0, #128
+ 610 04dc 0610A0E3 		mov	r1, #6
+ 611 04e0 012CA0E3 		mov	r2, #256
+ 612 04e4 0030A0E3 		mov	r3, #0
+ 613 04e8 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 614 04ec 08000BE5 		str	r0, [fp, #-8]
+ 362:../cyfxusbhost.c ****             (CY_U3P_USB_DEVICE_DESCR << 8), 0, 18, glEp0Buffer);
+ 363:../cyfxusbhost.c **** 
+ 364:../cyfxusbhost.c ****     vid = CY_U3P_MAKEWORD(glEp0Buffer[9], glEp0Buffer[8]) ;
+ 615              		.loc 1 364 0
+ 616 04f0 44319FE5 		ldr	r3, .L44
+ 617 04f4 0930D3E5 		ldrb	r3, [r3, #9]	@ zero_extendqisi2
+ 618 04f8 0334A0E1 		mov	r3, r3, asl #8
+ 619 04fc 0338A0E1 		mov	r3, r3, asl #16
+ 620 0500 2328A0E1 		mov	r2, r3, lsr #16
+ 621 0504 30319FE5 		ldr	r3, .L44
+ 622 0508 0830D3E5 		ldrb	r3, [r3, #8]	@ zero_extendqisi2
+ 623 050c 033082E1 		orr	r3, r2, r3
+ 624 0510 0338A0E1 		mov	r3, r3, asl #16
+ 625 0514 2338A0E1 		mov	r3, r3, lsr #16
+ 626 0518 BA304BE1 		strh	r3, [fp, #-10]	@ movhi
+ 365:../cyfxusbhost.c ****     pid = CY_U3P_MAKEWORD(glEp0Buffer[11], glEp0Buffer[10]) ;
+ 627              		.loc 1 365 0
+ 628 051c 18319FE5 		ldr	r3, .L44
+ 629 0520 0B30D3E5 		ldrb	r3, [r3, #11]	@ zero_extendqisi2
+ 630 0524 0334A0E1 		mov	r3, r3, asl #8
+ 631 0528 0338A0E1 		mov	r3, r3, asl #16
+ 632 052c 2328A0E1 		mov	r2, r3, lsr #16
+ 633 0530 04319FE5 		ldr	r3, .L44
+ 634 0534 0A30D3E5 		ldrb	r3, [r3, #10]	@ zero_extendqisi2
+ 635 0538 033082E1 		orr	r3, r2, r3
+ 636 053c 0338A0E1 		mov	r3, r3, asl #16
+ 637 0540 2338A0E1 		mov	r3, r3, lsr #16
+ 638 0544 BC304BE1 		strh	r3, [fp, #-12]	@ movhi
+ 366:../cyfxusbhost.c **** 
+ 367:../cyfxusbhost.c ****     pid_tmp  = pid & 0xFFF0;
+ 639              		.loc 1 367 0
+ 640 0548 BC305BE1 		ldrh	r3, [fp, #-12]	@ movhi
+ 641 054c 0F30C3E3 		bic	r3, r3, #15
+ 642 0550 BE304BE1 		strh	r3, [fp, #-14]	@ movhi
+ 368:../cyfxusbhost.c **** 
+ 369:../cyfxusbhost.c ****     CyU3PDebugPrint (4, "VID %x,PID %x \r\n", vid,pid);
+ 643              		.loc 1 369 0
+ 644 0554 BA205BE1 		ldrh	r2, [fp, #-10]
+ 645 0558 BC305BE1 		ldrh	r3, [fp, #-12]
+ 646 055c 0400A0E3 		mov	r0, #4
+ 647 0560 D8109FE5 		ldr	r1, .L44+4
+ 648 0564 FEFFFFEB 		bl	CyU3PDebugPrint
+ 370:../cyfxusbhost.c **** 
+ 371:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 649              		.loc 1 371 0
+ 650 0568 08301BE5 		ldr	r3, [fp, #-8]
+ 651 056c 000053E3 		cmp	r3, #0
+ 652 0570 2400001A 		bne	.L43
+ 653              	.L34:
+ 372:../cyfxusbhost.c ****     {
+ 373:../cyfxusbhost.c ****         goto enum_error;
+ 374:../cyfxusbhost.c ****     }
+ 375:../cyfxusbhost.c **** 
+ 376:../cyfxusbhost.c ****     if( (vid == 0x18D1) && (pid_tmp == 0x2d00) )
+ 654              		.loc 1 376 0
+ 655 0574 BA205BE1 		ldrh	r2, [fp, #-10]
+ 656 0578 C4309FE5 		ldr	r3, .L44+8
+ 657 057c 030052E1 		cmp	r2, r3
+ 658 0580 0D00001A 		bne	.L35
+ 659              		.loc 1 376 0 is_stmt 0 discriminator 1
+ 660 0584 BE305BE1 		ldrh	r3, [fp, #-14]
+ 661 0588 2D0C53E3 		cmp	r3, #11520
+ 662 058c 0A00001A 		bne	.L35
+ 663              	.LBB2:
+ 377:../cyfxusbhost.c ****     {
+ 378:../cyfxusbhost.c ****     	CyU3PDebugPrint (4, "In AOA Start\r\n");
+ 664              		.loc 1 378 0 is_stmt 1
+ 665 0590 0400A0E3 		mov	r0, #4
+ 666 0594 AC109FE5 		ldr	r1, .L44+12
+ 667 0598 FEFFFFEB 		bl	CyU3PDebugPrint
+ 379:../cyfxusbhost.c **** 
+ 380:../cyfxusbhost.c ****     	CyFxAOADriverInit();
+ 668              		.loc 1 380 0
+ 669 059c FEFFFFEB 		bl	CyFxAOADriverInit
+ 381:../cyfxusbhost.c ****         glIsApplnActive = CyTrue;
+ 670              		.loc 1 381 0
+ 671 05a0 A4309FE5 		ldr	r3, .L44+16
+ 672 05a4 0120A0E3 		mov	r2, #1
+ 673 05a8 002083E5 		str	r2, [r3, #0]
+ 382:../cyfxusbhost.c ****         glHostOwner = 4;
+ 674              		.loc 1 382 0
+ 675 05ac 9C309FE5 		ldr	r3, .L44+20
+ 676 05b0 0420A0E3 		mov	r2, #4
+ 677 05b4 0020C3E5 		strb	r2, [r3, #0]
+ 383:../cyfxusbhost.c ****     	return;
+ 678              		.loc 1 383 0
+ 679 05b8 1D0000EA 		b	.L26
+ 680              	.L35:
+ 681              	.LBE2:
+ 384:../cyfxusbhost.c **** 
+ 385:../cyfxusbhost.c ****     }
+ 386:../cyfxusbhost.c ****     else
+ 387:../cyfxusbhost.c ****     {
+ 388:../cyfxusbhost.c ****     	//CyU3PDebugPrint (4, "In AOA Start\r\n");
+ 389:../cyfxusbhost.c **** 
+ 390:../cyfxusbhost.c ****     //	CyFxAOADriverInit();
+ 391:../cyfxusbhost.c ****         /* Do nothing here. Fall-through to disable the USB port.
+ 392:../cyfxusbhost.c ****          * We do not support this device. */
+ 393:../cyfxusbhost.c ****     //  status = CY_U3P_ERROR_NOT_SUPPORTED;
+ 394:../cyfxusbhost.c ****         glIsApplnActive = CyTrue;
+ 682              		.loc 1 394 0
+ 683 05bc 88309FE5 		ldr	r3, .L44+16
+ 684 05c0 0120A0E3 		mov	r2, #1
+ 685 05c4 002083E5 		str	r2, [r3, #0]
+ 395:../cyfxusbhost.c ****         glHostOwner = 3;
+ 686              		.loc 1 395 0
+ 687 05c8 80309FE5 		ldr	r3, .L44+20
+ 688 05cc 0320A0E3 		mov	r2, #3
+ 689 05d0 0020C3E5 		strb	r2, [r3, #0]
+ 396:../cyfxusbhost.c **** 
+ 397:../cyfxusbhost.c ****         return;
+ 690              		.loc 1 397 0
+ 691 05d4 160000EA 		b	.L26
+ 692              	.L37:
+ 255:../cyfxusbhost.c ****         goto enum_error;
+ 693              		.loc 1 255 0
+ 694 05d8 0000A0E1 		mov	r0, r0	@ nop
+ 695 05dc 0A0000EA 		b	.L28
+ 696              	.L38:
+ 265:../cyfxusbhost.c ****         goto enum_error;
+ 697              		.loc 1 265 0
+ 698 05e0 0000A0E1 		mov	r0, r0	@ nop
+ 699 05e4 080000EA 		b	.L28
+ 700              	.L39:
+ 277:../cyfxusbhost.c ****             goto enum_error;
+ 701              		.loc 1 277 0
+ 702 05e8 0000A0E1 		mov	r0, r0	@ nop
+ 703 05ec 060000EA 		b	.L28
+ 704              	.L40:
+ 286:../cyfxusbhost.c ****         goto enum_error;
+ 705              		.loc 1 286 0
+ 706 05f0 0000A0E1 		mov	r0, r0	@ nop
+ 707 05f4 040000EA 		b	.L28
+ 708              	.L41:
+ 294:../cyfxusbhost.c ****         goto enum_error;
+ 709              		.loc 1 294 0
+ 710 05f8 0000A0E1 		mov	r0, r0	@ nop
+ 711 05fc 020000EA 		b	.L28
+ 712              	.L42:
+ 299:../cyfxusbhost.c ****         goto enum_error;
+ 713              		.loc 1 299 0
+ 714 0600 0000A0E1 		mov	r0, r0	@ nop
+ 715 0604 000000EA 		b	.L28
+ 716              	.L43:
+ 373:../cyfxusbhost.c ****         goto enum_error;
+ 717              		.loc 1 373 0
+ 718 0608 0000A0E1 		mov	r0, r0	@ nop
+ 719              	.L28:
+ 398:../cyfxusbhost.c ****     }
+ 399:../cyfxusbhost.c **** 
+ 400:../cyfxusbhost.c **** enum_error:
+ 401:../cyfxusbhost.c ****     /* Remove EP0. and disable the port. */
+ 402:../cyfxusbhost.c ****     glHostOwner = CY_FX_HOST_OWNER_NONE;
+ 720              		.loc 1 402 0
+ 721 060c 3C309FE5 		ldr	r3, .L44+20
+ 722 0610 0020A0E3 		mov	r2, #0
+ 723 0614 0020C3E5 		strb	r2, [r3, #0]
+ 403:../cyfxusbhost.c ****     CyU3PUsbHostEpRemove (0);
+ 724              		.loc 1 403 0
+ 725 0618 0000A0E3 		mov	r0, #0
+ 726 061c FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 404:../cyfxusbhost.c ****     CyU3PUsbHostPortDisable ();
+ 727              		.loc 1 404 0
+ 728 0620 FEFFFFEB 		bl	CyU3PUsbHostPortDisable
+ 405:../cyfxusbhost.c ****     CyU3PDebugPrint (4, "Application start failed with error: %d.\r\n", status);
+ 729              		.loc 1 405 0
+ 730 0624 0400A0E3 		mov	r0, #4
+ 731 0628 24109FE5 		ldr	r1, .L44+24
+ 732 062c 08201BE5 		ldr	r2, [fp, #-8]
+ 733 0630 FEFFFFEB 		bl	CyU3PDebugPrint
+ 734              	.L26:
+ 406:../cyfxusbhost.c **** }
+ 735              		.loc 1 406 0
+ 736 0634 04D04BE2 		sub	sp, fp, #4
+ 737 0638 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 738              	.L45:
+ 739              		.align	2
+ 740              	.L44:
+ 741 063c 00000000 		.word	glEp0Buffer
+ 742 0640 5C000000 		.word	.LC4
+ 743 0644 D1180000 		.word	6353
+ 744 0648 70000000 		.word	.LC5
+ 745 064c 00000000 		.word	glIsApplnActive
+ 746 0650 00000000 		.word	glHostOwner
+ 747 0654 80000000 		.word	.LC6
+ 748              		.cfi_endproc
+ 749              	.LFE5:
+ 751              		.align	2
+ 752              		.global	CyFxApplnStop
+ 754              	CyFxApplnStop:
+ 755              	.LFB6:
+ 407:../cyfxusbhost.c **** 
+ 408:../cyfxusbhost.c **** /* This function disables the mouse driver application. */
+ 409:../cyfxusbhost.c **** void
+ 410:../cyfxusbhost.c **** CyFxApplnStop ()
+ 411:../cyfxusbhost.c **** {
+ 756              		.loc 1 411 0
+ 757              		.cfi_startproc
+ 758              		@ args = 0, pretend = 0, frame = 0
+ 759              		@ frame_needed = 1, uses_anonymous_args = 0
+ 760 0658 00482DE9 		stmfd	sp!, {fp, lr}
+ 761              	.LCFI12:
+ 762              		.cfi_def_cfa_offset 8
+ 763 065c 04B08DE2 		add	fp, sp, #4
+ 764              		.cfi_offset 14, -4
+ 765              		.cfi_offset 11, -8
+ 766              	.LCFI13:
+ 767              		.cfi_def_cfa 11, 4
+ 412:../cyfxusbhost.c ****     if (glHostOwner == CY_FX_HOST_OWNER_MOUSE_DRIVER)
+ 768              		.loc 1 412 0
+ 769 0660 48309FE5 		ldr	r3, .L49
+ 770 0664 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 771 0668 010053E3 		cmp	r3, #1
+ 772 066c 0000001A 		bne	.L47
+ 413:../cyfxusbhost.c ****     {
+ 414:../cyfxusbhost.c ****         CyFxMouseDriverDeInit ();
+ 773              		.loc 1 414 0
+ 774 0670 FEFFFFEB 		bl	CyFxMouseDriverDeInit
+ 775              	.L47:
+ 415:../cyfxusbhost.c ****     }
+ 416:../cyfxusbhost.c ****     if (glHostOwner == CY_FX_HOST_OWNER_MSC_DRIVER)
+ 776              		.loc 1 416 0
+ 777 0674 34309FE5 		ldr	r3, .L49
+ 778 0678 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 779 067c 020053E3 		cmp	r3, #2
+ 780 0680 0000001A 		bne	.L48
+ 417:../cyfxusbhost.c ****     {
+ 418:../cyfxusbhost.c ****         CyFxMscDriverDeInit ();
+ 781              		.loc 1 418 0
+ 782 0684 FEFFFFEB 		bl	CyFxMscDriverDeInit
+ 783              	.L48:
+ 419:../cyfxusbhost.c ****     }
+ 420:../cyfxusbhost.c **** 
+ 421:../cyfxusbhost.c ****     /* Remove EP0. and disable the port. */
+ 422:../cyfxusbhost.c ****     CyU3PUsbHostEpRemove (0);
+ 784              		.loc 1 422 0
+ 785 0688 0000A0E3 		mov	r0, #0
+ 786 068c FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 423:../cyfxusbhost.c ****     CyU3PUsbHostPortDisable ();
+ 787              		.loc 1 423 0
+ 788 0690 FEFFFFEB 		bl	CyU3PUsbHostPortDisable
+ 424:../cyfxusbhost.c **** 
+ 425:../cyfxusbhost.c ****     glHostOwner = CY_FX_HOST_OWNER_NONE;
+ 789              		.loc 1 425 0
+ 790 0694 14309FE5 		ldr	r3, .L49
+ 791 0698 0020A0E3 		mov	r2, #0
+ 792 069c 0020C3E5 		strb	r2, [r3, #0]
+ 426:../cyfxusbhost.c **** 
+ 427:../cyfxusbhost.c ****     /* Clear state variables. */
+ 428:../cyfxusbhost.c ****     glIsApplnActive = CyFalse;
+ 793              		.loc 1 428 0
+ 794 06a0 0C309FE5 		ldr	r3, .L49+4
+ 795 06a4 0020A0E3 		mov	r2, #0
+ 796 06a8 002083E5 		str	r2, [r3, #0]
+ 429:../cyfxusbhost.c **** }
+ 797              		.loc 1 429 0
+ 798 06ac 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 799              	.L50:
+ 800              		.align	2
+ 801              	.L49:
+ 802 06b0 00000000 		.word	glHostOwner
+ 803 06b4 00000000 		.word	glIsApplnActive
+ 804              		.cfi_endproc
+ 805              	.LFE6:
+ 807              		.align	2
+ 808              		.global	CyFxUsbHostStart
+ 810              	CyFxUsbHostStart:
+ 811              	.LFB7:
+ 430:../cyfxusbhost.c **** 
+ 431:../cyfxusbhost.c **** /* This function initializes the USB host stack. */
+ 432:../cyfxusbhost.c **** void
+ 433:../cyfxusbhost.c **** CyFxUsbHostStart ()
+ 434:../cyfxusbhost.c **** {
+ 812              		.loc 1 434 0
+ 813              		.cfi_startproc
+ 814              		@ args = 0, pretend = 0, frame = 16
+ 815              		@ frame_needed = 1, uses_anonymous_args = 0
+ 816 06b8 00482DE9 		stmfd	sp!, {fp, lr}
+ 817              	.LCFI14:
+ 818              		.cfi_def_cfa_offset 8
+ 819 06bc 04B08DE2 		add	fp, sp, #4
+ 820              		.cfi_offset 14, -4
+ 821              		.cfi_offset 11, -8
+ 822              	.LCFI15:
+ 823              		.cfi_def_cfa 11, 4
+ 824 06c0 10D04DE2 		sub	sp, sp, #16
+ 435:../cyfxusbhost.c ****     CyU3PUsbHostConfig_t hostCfg;
+ 436:../cyfxusbhost.c ****     CyU3PReturnStatus_t status;
+ 437:../cyfxusbhost.c **** 
+ 438:../cyfxusbhost.c ****     hostCfg.ep0LowLevelControl = CyFalse;
+ 825              		.loc 1 438 0
+ 826 06c4 0030A0E3 		mov	r3, #0
+ 827 06c8 14300BE5 		str	r3, [fp, #-20]
+ 439:../cyfxusbhost.c ****     hostCfg.eventCb = CyFxHostEventCb;
+ 828              		.loc 1 439 0
+ 829 06cc 2C309FE5 		ldr	r3, .L53
+ 830 06d0 10300BE5 		str	r3, [fp, #-16]
+ 440:../cyfxusbhost.c ****     hostCfg.xferCb = NULL;
+ 831              		.loc 1 440 0
+ 832 06d4 0030A0E3 		mov	r3, #0
+ 833 06d8 0C300BE5 		str	r3, [fp, #-12]
+ 441:../cyfxusbhost.c ****     status = CyU3PUsbHostStart (&hostCfg);
+ 834              		.loc 1 441 0
+ 835 06dc 14304BE2 		sub	r3, fp, #20
+ 836 06e0 0300A0E1 		mov	r0, r3
+ 837 06e4 FEFFFFEB 		bl	CyU3PUsbHostStart
+ 838 06e8 08000BE5 		str	r0, [fp, #-8]
+ 442:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 839              		.loc 1 442 0
+ 840 06ec 08301BE5 		ldr	r3, [fp, #-8]
+ 841 06f0 000053E3 		cmp	r3, #0
+ 443:../cyfxusbhost.c ****     {
+ 444:../cyfxusbhost.c ****         return;
+ 842              		.loc 1 444 0
+ 843 06f4 0000A0E1 		mov	r0, r0	@ nop
+ 445:../cyfxusbhost.c ****     }
+ 446:../cyfxusbhost.c **** }
+ 844              		.loc 1 446 0
+ 845 06f8 04D04BE2 		sub	sp, fp, #4
+ 846 06fc 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 847              	.L54:
+ 848              		.align	2
+ 849              	.L53:
+ 850 0700 00000000 		.word	CyFxHostEventCb
+ 851              		.cfi_endproc
+ 852              	.LFE7:
+ 854              		.align	2
+ 855              		.global	CyFxUsbHostStop
+ 857              	CyFxUsbHostStop:
+ 858              	.LFB8:
+ 447:../cyfxusbhost.c **** 
+ 448:../cyfxusbhost.c **** /* This function disables the USB host stack. */
+ 449:../cyfxusbhost.c **** void
+ 450:../cyfxusbhost.c **** CyFxUsbHostStop ()
+ 451:../cyfxusbhost.c **** {
+ 859              		.loc 1 451 0
+ 860              		.cfi_startproc
+ 861              		@ args = 0, pretend = 0, frame = 0
+ 862              		@ frame_needed = 1, uses_anonymous_args = 0
+ 863 0704 00482DE9 		stmfd	sp!, {fp, lr}
+ 864              	.LCFI16:
+ 865              		.cfi_def_cfa_offset 8
+ 866 0708 04B08DE2 		add	fp, sp, #4
+ 867              		.cfi_offset 14, -4
+ 868              		.cfi_offset 11, -8
+ 869              	.LCFI17:
+ 870              		.cfi_def_cfa 11, 4
+ 452:../cyfxusbhost.c ****     /* Stop host mode application if running. */
+ 453:../cyfxusbhost.c ****     if (glIsApplnActive)
+ 871              		.loc 1 453 0
+ 872 070c 14309FE5 		ldr	r3, .L57
+ 873 0710 003093E5 		ldr	r3, [r3, #0]
+ 874 0714 000053E3 		cmp	r3, #0
+ 875 0718 0000000A 		beq	.L56
+ 454:../cyfxusbhost.c ****     {
+ 455:../cyfxusbhost.c ****         CyFxApplnStop ();
+ 876              		.loc 1 455 0
+ 877 071c FEFFFFEB 		bl	CyFxApplnStop
+ 878              	.L56:
+ 456:../cyfxusbhost.c ****     }
+ 457:../cyfxusbhost.c **** 
+ 458:../cyfxusbhost.c ****     /* Stop the host module. */
+ 459:../cyfxusbhost.c ****     CyU3PUsbHostStop ();
+ 879              		.loc 1 459 0
+ 880 0720 FEFFFFEB 		bl	CyU3PUsbHostStop
+ 460:../cyfxusbhost.c **** }
+ 881              		.loc 1 460 0
+ 882 0724 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 883              	.L58:
+ 884              		.align	2
+ 885              	.L57:
+ 886 0728 00000000 		.word	glIsApplnActive
+ 887              		.cfi_endproc
+ 888              	.LFE8:
+ 890              		.section	.rodata
+ 891 00ab 00       		.align	2
+ 892              	.LC7:
+ 893 00ac 56425553 		.ascii	"VBUS On\012\000"
+ 893      204F6E0A 
+ 893      00
+ 894 00b5 000000   		.align	2
+ 895              	.LC8:
+ 896 00b8 56425553 		.ascii	"VBUS Off\012\000"
+ 896      204F6666 
+ 896      0A00
+ 897              		.text
+ 898              		.align	2
+ 899              		.global	CyFxUsbVBusControl
+ 901              	CyFxUsbVBusControl:
+ 902              	.LFB9:
+ 461:../cyfxusbhost.c **** 
+ 462:../cyfxusbhost.c **** /* This function enables / disables driving VBUS. */
+ 463:../cyfxusbhost.c **** void
+ 464:../cyfxusbhost.c **** CyFxUsbVBusControl (
+ 465:../cyfxusbhost.c ****         CyBool_t isEnable)
+ 466:../cyfxusbhost.c **** {
+ 903              		.loc 1 466 0
+ 904              		.cfi_startproc
+ 905              		@ args = 0, pretend = 0, frame = 8
+ 906              		@ frame_needed = 1, uses_anonymous_args = 0
+ 907 072c 00482DE9 		stmfd	sp!, {fp, lr}
+ 908              	.LCFI18:
+ 909              		.cfi_def_cfa_offset 8
+ 910 0730 04B08DE2 		add	fp, sp, #4
+ 911              		.cfi_offset 14, -4
+ 912              		.cfi_offset 11, -8
+ 913              	.LCFI19:
+ 914              		.cfi_def_cfa 11, 4
+ 915 0734 08D04DE2 		sub	sp, sp, #8
+ 916 0738 08000BE5 		str	r0, [fp, #-8]
+ 467:../cyfxusbhost.c ****     if (isEnable)
+ 917              		.loc 1 467 0
+ 918 073c 08301BE5 		ldr	r3, [fp, #-8]
+ 919 0740 000053E3 		cmp	r3, #0
+ 920 0744 0A00000A 		beq	.L60
+ 468:../cyfxusbhost.c ****     {
+ 469:../cyfxusbhost.c ****         /* Drive VBUS only if no-one else is driving. */
+ 470:../cyfxusbhost.c ****         if (!CyU3POtgIsVBusValid ())
+ 921              		.loc 1 470 0
+ 922 0748 FEFFFFEB 		bl	CyU3POtgIsVBusValid
+ 923 074c 0030A0E1 		mov	r3, r0
+ 924 0750 000053E3 		cmp	r3, #0
+ 925 0754 0C00001A 		bne	.L59
+ 471:../cyfxusbhost.c ****         {
+ 472:../cyfxusbhost.c ****         	CyU3PDebugPrint(2, "VBUS On\n");
+ 926              		.loc 1 472 0
+ 927 0758 0200A0E3 		mov	r0, #2
+ 928 075c 30109FE5 		ldr	r1, .L62
+ 929 0760 FEFFFFEB 		bl	CyU3PDebugPrint
+ 473:../cyfxusbhost.c ****             CyU3PGpioSimpleSetValue (21, CY_FX_HOST_VBUS_ENABLE_VALUE);
+ 930              		.loc 1 473 0
+ 931 0764 1500A0E3 		mov	r0, #21
+ 932 0768 0110A0E3 		mov	r1, #1
+ 933 076c FEFFFFEB 		bl	CyU3PGpioSimpleSetValue
+ 934 0770 050000EA 		b	.L59
+ 935              	.L60:
+ 474:../cyfxusbhost.c ****         }
+ 475:../cyfxusbhost.c ****     }
+ 476:../cyfxusbhost.c ****     else
+ 477:../cyfxusbhost.c ****     {
+ 478:../cyfxusbhost.c ****     	CyU3PDebugPrint(2, "VBUS Off\n");
+ 936              		.loc 1 478 0
+ 937 0774 0200A0E3 		mov	r0, #2
+ 938 0778 18109FE5 		ldr	r1, .L62+4
+ 939 077c FEFFFFEB 		bl	CyU3PDebugPrint
+ 479:../cyfxusbhost.c ****         CyU3PGpioSimpleSetValue (21, CY_FX_HOST_VBUS_DISABLE_VALUE);
+ 940              		.loc 1 479 0
+ 941 0780 1500A0E3 		mov	r0, #21
+ 942 0784 0010A0E3 		mov	r1, #0
+ 943 0788 FEFFFFEB 		bl	CyU3PGpioSimpleSetValue
+ 944              	.L59:
+ 480:../cyfxusbhost.c ****     }
+ 481:../cyfxusbhost.c **** }
+ 945              		.loc 1 481 0
+ 946 078c 04D04BE2 		sub	sp, fp, #4
+ 947 0790 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 948              	.L63:
+ 949              		.align	2
+ 950              	.L62:
+ 951 0794 AC000000 		.word	.LC7
+ 952 0798 B8000000 		.word	.LC8
+ 953              		.cfi_endproc
+ 954              	.LFE9:
+ 956              		.section	.rodata
+ 957 00c2 0000     		.align	2
+ 958              	.LC9:
+ 959 00c4 4F544720 		.ascii	"OTG Event: %d, Input: %d.\015\012\000"
+ 959      4576656E 
+ 959      743A2025 
+ 959      642C2049 
+ 959      6E707574 
+ 960              		.text
+ 961              		.align	2
+ 962              		.global	CyFxOtgEventCb
+ 964              	CyFxOtgEventCb:
+ 965              	.LFB10:
+ 482:../cyfxusbhost.c **** 
+ 483:../cyfxusbhost.c **** /* OTG event handler. */
+ 484:../cyfxusbhost.c **** void
+ 485:../cyfxusbhost.c **** CyFxOtgEventCb (
+ 486:../cyfxusbhost.c ****         CyU3POtgEvent_t event,
+ 487:../cyfxusbhost.c ****         uint32_t input)
+ 488:../cyfxusbhost.c **** {
+ 966              		.loc 1 488 0
+ 967              		.cfi_startproc
+ 968              		@ args = 0, pretend = 0, frame = 8
+ 969              		@ frame_needed = 1, uses_anonymous_args = 0
+ 970 079c 00482DE9 		stmfd	sp!, {fp, lr}
+ 971              	.LCFI20:
+ 972              		.cfi_def_cfa_offset 8
+ 973 07a0 04B08DE2 		add	fp, sp, #4
+ 974              		.cfi_offset 14, -4
+ 975              		.cfi_offset 11, -8
+ 976              	.LCFI21:
+ 977              		.cfi_def_cfa 11, 4
+ 978 07a4 08D04DE2 		sub	sp, sp, #8
+ 979 07a8 0030A0E1 		mov	r3, r0
+ 980 07ac 0C100BE5 		str	r1, [fp, #-12]
+ 981 07b0 05304BE5 		strb	r3, [fp, #-5]
+ 489:../cyfxusbhost.c ****     CyU3PDebugPrint (4, "OTG Event: %d, Input: %d.\r\n", event, input);
+ 982              		.loc 1 489 0
+ 983 07b4 05305BE5 		ldrb	r3, [fp, #-5]	@ zero_extendqisi2
+ 984 07b8 0400A0E3 		mov	r0, #4
+ 985 07bc E0109FE5 		ldr	r1, .L78
+ 986 07c0 0320A0E1 		mov	r2, r3
+ 987 07c4 0C301BE5 		ldr	r3, [fp, #-12]
+ 988 07c8 FEFFFFEB 		bl	CyU3PDebugPrint
+ 490:../cyfxusbhost.c ****     switch (event)
+ 989              		.loc 1 490 0
+ 990 07cc 05305BE5 		ldrb	r3, [fp, #-5]	@ zero_extendqisi2
+ 991 07d0 000053E3 		cmp	r3, #0
+ 992 07d4 0200000A 		beq	.L66
+ 993 07d8 020053E3 		cmp	r3, #2
+ 994 07dc 1200000A 		beq	.L67
+ 491:../cyfxusbhost.c ****     {
+ 492:../cyfxusbhost.c ****         case CY_U3P_OTG_PERIPHERAL_CHANGE:
+ 493:../cyfxusbhost.c ****             if (input == CY_U3P_OTG_TYPE_A_CABLE)
+ 494:../cyfxusbhost.c ****             {
+ 495:../cyfxusbhost.c ****                 /* Enable the VBUS supply. */
+ 496:../cyfxusbhost.c ****                 CyFxUsbVBusControl (CyTrue);
+ 497:../cyfxusbhost.c ****             }
+ 498:../cyfxusbhost.c ****             else
+ 499:../cyfxusbhost.c ****             {
+ 500:../cyfxusbhost.c ****                 /* Make sure that the VBUS supply is disabled. */
+ 501:../cyfxusbhost.c ****                 CyFxUsbVBusControl (CyFalse);
+ 502:../cyfxusbhost.c **** 
+ 503:../cyfxusbhost.c ****                 /* Stop the previously started host stack. */
+ 504:../cyfxusbhost.c ****                 if ((!CyU3POtgIsHostMode ()) && (CyU3PUsbHostIsStarted ()))
+ 505:../cyfxusbhost.c ****                 {
+ 506:../cyfxusbhost.c ****                     CyFxUsbHostStop ();
+ 507:../cyfxusbhost.c ****                 }
+ 508:../cyfxusbhost.c ****             }
+ 509:../cyfxusbhost.c ****             break;
+ 510:../cyfxusbhost.c **** 
+ 511:../cyfxusbhost.c ****         case CY_U3P_OTG_VBUS_VALID_CHANGE:
+ 512:../cyfxusbhost.c ****             if (input)
+ 513:../cyfxusbhost.c ****             {
+ 514:../cyfxusbhost.c ****                 /* Start the host mode stack. */
+ 515:../cyfxusbhost.c ****                 if (!CyU3PUsbHostIsStarted ())
+ 516:../cyfxusbhost.c ****                 {
+ 517:../cyfxusbhost.c ****                     CyFxUsbHostStart ();
+ 518:../cyfxusbhost.c ****                 }
+ 519:../cyfxusbhost.c ****             }
+ 520:../cyfxusbhost.c ****             else
+ 521:../cyfxusbhost.c ****             {
+ 522:../cyfxusbhost.c ****                 /* If the OTG mode has changed, stop the previous stack. */
+ 523:../cyfxusbhost.c ****                 if ((!CyU3POtgIsHostMode ()) && (CyU3PUsbHostIsStarted ()))
+ 524:../cyfxusbhost.c ****                 {
+ 525:../cyfxusbhost.c ****                     /* Stop the previously started host stack. */
+ 526:../cyfxusbhost.c ****                     CyFxUsbHostStop ();
+ 527:../cyfxusbhost.c ****                 }
+ 528:../cyfxusbhost.c ****             }
+ 529:../cyfxusbhost.c ****             break;
+ 530:../cyfxusbhost.c **** 
+ 531:../cyfxusbhost.c ****         default:
+ 532:../cyfxusbhost.c ****             /* do nothing */
+ 533:../cyfxusbhost.c ****             break;
+ 995              		.loc 1 533 0
+ 996 07e0 2D0000EA 		b	.L64
+ 997              	.L66:
+ 493:../cyfxusbhost.c ****             if (input == CY_U3P_OTG_TYPE_A_CABLE)
+ 998              		.loc 1 493 0
+ 999 07e4 0C301BE5 		ldr	r3, [fp, #-12]
+ 1000 07e8 010053E3 		cmp	r3, #1
+ 1001 07ec 0200001A 		bne	.L68
+ 496:../cyfxusbhost.c ****                 CyFxUsbVBusControl (CyTrue);
+ 1002              		.loc 1 496 0
+ 1003 07f0 0100A0E3 		mov	r0, #1
+ 1004 07f4 FEFFFFEB 		bl	CyFxUsbVBusControl
+ 509:../cyfxusbhost.c ****             break;
+ 1005              		.loc 1 509 0
+ 1006 07f8 270000EA 		b	.L64
+ 1007              	.L68:
+ 501:../cyfxusbhost.c ****                 CyFxUsbVBusControl (CyFalse);
+ 1008              		.loc 1 501 0
+ 1009 07fc 0000A0E3 		mov	r0, #0
+ 1010 0800 FEFFFFEB 		bl	CyFxUsbVBusControl
+ 504:../cyfxusbhost.c ****                 if ((!CyU3POtgIsHostMode ()) && (CyU3PUsbHostIsStarted ()))
+ 1011              		.loc 1 504 0
+ 1012 0804 FEFFFFEB 		bl	CyU3POtgIsHostMode
+ 1013 0808 0030A0E1 		mov	r3, r0
+ 1014 080c 000053E3 		cmp	r3, #0
+ 1015 0810 1800001A 		bne	.L73
+ 504:../cyfxusbhost.c ****                 if ((!CyU3POtgIsHostMode ()) && (CyU3PUsbHostIsStarted ()))
+ 1016              		.loc 1 504 0 is_stmt 0 discriminator 1
+ 1017 0814 FEFFFFEB 		bl	CyU3PUsbHostIsStarted
+ 1018 0818 0030A0E1 		mov	r3, r0
+ 1019 081c 000053E3 		cmp	r3, #0
+ 1020 0820 1600000A 		beq	.L74
+ 506:../cyfxusbhost.c ****                     CyFxUsbHostStop ();
+ 1021              		.loc 1 506 0 is_stmt 1
+ 1022 0824 FEFFFFEB 		bl	CyFxUsbHostStop
+ 509:../cyfxusbhost.c ****             break;
+ 1023              		.loc 1 509 0
+ 1024 0828 1B0000EA 		b	.L64
+ 1025              	.L67:
+ 512:../cyfxusbhost.c ****             if (input)
+ 1026              		.loc 1 512 0
+ 1027 082c 0C301BE5 		ldr	r3, [fp, #-12]
+ 1028 0830 000053E3 		cmp	r3, #0
+ 1029 0834 0500000A 		beq	.L71
+ 515:../cyfxusbhost.c ****                 if (!CyU3PUsbHostIsStarted ())
+ 1030              		.loc 1 515 0
+ 1031 0838 FEFFFFEB 		bl	CyU3PUsbHostIsStarted
+ 1032 083c 0030A0E1 		mov	r3, r0
+ 1033 0840 000053E3 		cmp	r3, #0
+ 1034 0844 0F00001A 		bne	.L75
+ 517:../cyfxusbhost.c ****                     CyFxUsbHostStart ();
+ 1035              		.loc 1 517 0
+ 1036 0848 FEFFFFEB 		bl	CyFxUsbHostStart
+ 529:../cyfxusbhost.c ****             break;
+ 1037              		.loc 1 529 0
+ 1038 084c 120000EA 		b	.L64
+ 1039              	.L71:
+ 523:../cyfxusbhost.c ****                 if ((!CyU3POtgIsHostMode ()) && (CyU3PUsbHostIsStarted ()))
+ 1040              		.loc 1 523 0
+ 1041 0850 FEFFFFEB 		bl	CyU3POtgIsHostMode
+ 1042 0854 0030A0E1 		mov	r3, r0
+ 1043 0858 000053E3 		cmp	r3, #0
+ 1044 085c 0B00001A 		bne	.L76
+ 523:../cyfxusbhost.c ****                 if ((!CyU3POtgIsHostMode ()) && (CyU3PUsbHostIsStarted ()))
+ 1045              		.loc 1 523 0 is_stmt 0 discriminator 1
+ 1046 0860 FEFFFFEB 		bl	CyU3PUsbHostIsStarted
+ 1047 0864 0030A0E1 		mov	r3, r0
+ 1048 0868 000053E3 		cmp	r3, #0
+ 1049 086c 0900000A 		beq	.L77
+ 526:../cyfxusbhost.c ****                     CyFxUsbHostStop ();
+ 1050              		.loc 1 526 0 is_stmt 1
+ 1051 0870 FEFFFFEB 		bl	CyFxUsbHostStop
+ 529:../cyfxusbhost.c ****             break;
+ 1052              		.loc 1 529 0
+ 1053 0874 080000EA 		b	.L64
+ 1054              	.L73:
+ 509:../cyfxusbhost.c ****             break;
+ 1055              		.loc 1 509 0
+ 1056 0878 0000A0E1 		mov	r0, r0	@ nop
+ 1057 087c 060000EA 		b	.L64
+ 1058              	.L74:
+ 1059 0880 0000A0E1 		mov	r0, r0	@ nop
+ 1060 0884 040000EA 		b	.L64
+ 1061              	.L75:
+ 529:../cyfxusbhost.c ****             break;
+ 1062              		.loc 1 529 0
+ 1063 0888 0000A0E1 		mov	r0, r0	@ nop
+ 1064 088c 020000EA 		b	.L64
+ 1065              	.L76:
+ 1066 0890 0000A0E1 		mov	r0, r0	@ nop
+ 1067 0894 000000EA 		b	.L64
+ 1068              	.L77:
+ 1069 0898 0000A0E1 		mov	r0, r0	@ nop
+ 1070              	.L64:
+ 534:../cyfxusbhost.c ****     }
+ 535:../cyfxusbhost.c **** }
+ 1071              		.loc 1 535 0
+ 1072 089c 04D04BE2 		sub	sp, fp, #4
+ 1073 08a0 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1074              	.L79:
+ 1075              		.align	2
+ 1076              	.L78:
+ 1077 08a4 C4000000 		.word	.LC9
+ 1078              		.cfi_endproc
+ 1079              	.LFE10:
+ 1081              		.align	2
+ 1082              		.global	CyFxApplnInit
+ 1084              	CyFxApplnInit:
+ 1085              	.LFB11:
+ 536:../cyfxusbhost.c **** 
+ 537:../cyfxusbhost.c **** /* This function initializes the USB module. */
+ 538:../cyfxusbhost.c **** CyU3PReturnStatus_t
+ 539:../cyfxusbhost.c **** CyFxApplnInit (void)
+ 540:../cyfxusbhost.c **** {
+ 1086              		.loc 1 540 0
+ 1087              		.cfi_startproc
+ 1088              		@ args = 0, pretend = 0, frame = 48
+ 1089              		@ frame_needed = 1, uses_anonymous_args = 0
+ 1090 08a8 00482DE9 		stmfd	sp!, {fp, lr}
+ 1091              	.LCFI22:
+ 1092              		.cfi_def_cfa_offset 8
+ 1093 08ac 04B08DE2 		add	fp, sp, #4
+ 1094              		.cfi_offset 14, -4
+ 1095              		.cfi_offset 11, -8
+ 1096              	.LCFI23:
+ 1097              		.cfi_def_cfa 11, 4
+ 1098 08b0 30D04DE2 		sub	sp, sp, #48
+ 541:../cyfxusbhost.c ****     CyU3POtgConfig_t otgCfg;
+ 542:../cyfxusbhost.c ****     CyU3PGpioClock_t clkCfg;
+ 543:../cyfxusbhost.c ****     CyU3PGpioSimpleConfig_t simpleCfg;
+ 544:../cyfxusbhost.c ****     CyU3PReturnStatus_t status;
+ 545:../cyfxusbhost.c **** 
+ 546:../cyfxusbhost.c ****     /* Initialize GPIO module. */
+ 547:../cyfxusbhost.c ****     clkCfg.fastClkDiv = 2;
+ 1099              		.loc 1 547 0
+ 1100 08b4 0230A0E3 		mov	r3, #2
+ 1101 08b8 1C304BE5 		strb	r3, [fp, #-28]
+ 548:../cyfxusbhost.c ****     clkCfg.slowClkDiv = 0;
+ 1102              		.loc 1 548 0
+ 1103 08bc 0030A0E3 		mov	r3, #0
+ 1104 08c0 1B304BE5 		strb	r3, [fp, #-27]
+ 549:../cyfxusbhost.c ****     clkCfg.halfDiv = CyFalse;
+ 1105              		.loc 1 549 0
+ 1106 08c4 0030A0E3 		mov	r3, #0
+ 1107 08c8 18300BE5 		str	r3, [fp, #-24]
+ 550:../cyfxusbhost.c ****     clkCfg.simpleDiv = CY_U3P_GPIO_SIMPLE_DIV_BY_2;
+ 1108              		.loc 1 550 0
+ 1109 08cc 0030A0E3 		mov	r3, #0
+ 1110 08d0 14304BE5 		strb	r3, [fp, #-20]
+ 551:../cyfxusbhost.c ****     clkCfg.clkSrc = CY_U3P_SYS_CLK;
+ 1111              		.loc 1 551 0
+ 1112 08d4 0330A0E3 		mov	r3, #3
+ 1113 08d8 13304BE5 		strb	r3, [fp, #-19]
+ 552:../cyfxusbhost.c ****     status = CyU3PGpioInit (&clkCfg, NULL);
+ 1114              		.loc 1 552 0
+ 1115 08dc 1C304BE2 		sub	r3, fp, #28
+ 1116 08e0 0300A0E1 		mov	r0, r3
+ 1117 08e4 0010A0E3 		mov	r1, #0
+ 1118 08e8 FEFFFFEB 		bl	CyU3PGpioInit
+ 1119 08ec 08000BE5 		str	r0, [fp, #-8]
+ 553:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 1120              		.loc 1 553 0
+ 1121 08f0 08301BE5 		ldr	r3, [fp, #-8]
+ 1122 08f4 000053E3 		cmp	r3, #0
+ 1123 08f8 0100000A 		beq	.L81
+ 554:../cyfxusbhost.c ****     {
+ 555:../cyfxusbhost.c ****         return status;
+ 1124              		.loc 1 555 0
+ 1125 08fc 08301BE5 		ldr	r3, [fp, #-8]
+ 1126 0900 330000EA 		b	.L82
+ 1127              	.L81:
+ 556:../cyfxusbhost.c ****     }
+ 557:../cyfxusbhost.c **** 
+ 558:../cyfxusbhost.c ****     /* Override GPIO 21 for VBUS control. */
+ 559:../cyfxusbhost.c ****     status = CyU3PDeviceGpioOverride (21, CyTrue);
+ 1128              		.loc 1 559 0
+ 1129 0904 1500A0E3 		mov	r0, #21
+ 1130 0908 0110A0E3 		mov	r1, #1
+ 1131 090c FEFFFFEB 		bl	CyU3PDeviceGpioOverride
+ 1132 0910 08000BE5 		str	r0, [fp, #-8]
+ 560:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 1133              		.loc 1 560 0
+ 1134 0914 08301BE5 		ldr	r3, [fp, #-8]
+ 1135 0918 000053E3 		cmp	r3, #0
+ 1136 091c 0100000A 		beq	.L83
+ 561:../cyfxusbhost.c ****     {
+ 562:../cyfxusbhost.c ****         return status;
+ 1137              		.loc 1 562 0
+ 1138 0920 08301BE5 		ldr	r3, [fp, #-8]
+ 1139 0924 2A0000EA 		b	.L82
+ 1140              	.L83:
+ 563:../cyfxusbhost.c ****     }
+ 564:../cyfxusbhost.c **** 
+ 565:../cyfxusbhost.c ****     /* Configure GPIO 21 as output for VBUS control. */
+ 566:../cyfxusbhost.c ****     simpleCfg.outValue = CY_FX_HOST_VBUS_DISABLE_VALUE;
+ 1141              		.loc 1 566 0
+ 1142 0928 0030A0E3 		mov	r3, #0
+ 1143 092c 30300BE5 		str	r3, [fp, #-48]
+ 567:../cyfxusbhost.c ****     simpleCfg.driveLowEn = CyTrue;
+ 1144              		.loc 1 567 0
+ 1145 0930 0130A0E3 		mov	r3, #1
+ 1146 0934 2C300BE5 		str	r3, [fp, #-44]
+ 568:../cyfxusbhost.c ****     simpleCfg.driveHighEn = CyTrue;
+ 1147              		.loc 1 568 0
+ 1148 0938 0130A0E3 		mov	r3, #1
+ 1149 093c 28300BE5 		str	r3, [fp, #-40]
+ 569:../cyfxusbhost.c ****     simpleCfg.inputEn = CyFalse;
+ 1150              		.loc 1 569 0
+ 1151 0940 0030A0E3 		mov	r3, #0
+ 1152 0944 24300BE5 		str	r3, [fp, #-36]
+ 570:../cyfxusbhost.c ****     simpleCfg.intrMode = CY_U3P_GPIO_NO_INTR;
+ 1153              		.loc 1 570 0
+ 1154 0948 0030A0E3 		mov	r3, #0
+ 1155 094c 20304BE5 		strb	r3, [fp, #-32]
+ 571:../cyfxusbhost.c ****     status = CyU3PGpioSetSimpleConfig (21, &simpleCfg);
+ 1156              		.loc 1 571 0
+ 1157 0950 30304BE2 		sub	r3, fp, #48
+ 1158 0954 1500A0E3 		mov	r0, #21
+ 1159 0958 0310A0E1 		mov	r1, r3
+ 1160 095c FEFFFFEB 		bl	CyU3PGpioSetSimpleConfig
+ 1161 0960 08000BE5 		str	r0, [fp, #-8]
+ 572:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 1162              		.loc 1 572 0
+ 1163 0964 08301BE5 		ldr	r3, [fp, #-8]
+ 1164 0968 000053E3 		cmp	r3, #0
+ 1165 096c 0100000A 		beq	.L84
+ 573:../cyfxusbhost.c ****     {
+ 574:../cyfxusbhost.c ****         return status;
+ 1166              		.loc 1 574 0
+ 1167 0970 08301BE5 		ldr	r3, [fp, #-8]
+ 1168 0974 160000EA 		b	.L82
+ 1169              	.L84:
+ 575:../cyfxusbhost.c ****     }
+ 576:../cyfxusbhost.c **** 
+ 577:../cyfxusbhost.c ****     CyFxUsbVBusControl(CyFalse);
+ 1170              		.loc 1 577 0
+ 1171 0978 0000A0E3 		mov	r0, #0
+ 1172 097c FEFFFFEB 		bl	CyFxUsbVBusControl
+ 578:../cyfxusbhost.c **** 
+ 579:../cyfxusbhost.c ****     /* Wait until VBUS is stabilized. */
+ 580:../cyfxusbhost.c ****     CyU3PThreadSleep (100);
+ 1173              		.loc 1 580 0
+ 1174 0980 6400A0E3 		mov	r0, #100
+ 1175 0984 FEFFFFEB 		bl	_tx_thread_sleep
+ 581:../cyfxusbhost.c **** 
+ 582:../cyfxusbhost.c ****     /* Initialize the OTG module. */
+ 583:../cyfxusbhost.c ****     otgCfg.otgMode = CY_U3P_OTG_MODE_OTG;
+ 1176              		.loc 1 583 0
+ 1177 0988 0230A0E3 		mov	r3, #2
+ 1178 098c 10304BE5 		strb	r3, [fp, #-16]
+ 584:../cyfxusbhost.c ****     otgCfg.chargerMode = CY_U3P_OTG_CHARGER_DETECT_ACA_MODE;
+ 1179              		.loc 1 584 0
+ 1180 0990 0030A0E3 		mov	r3, #0
+ 1181 0994 0F304BE5 		strb	r3, [fp, #-15]
+ 585:../cyfxusbhost.c ****     otgCfg.cb = CyFxOtgEventCb;
+ 1182              		.loc 1 585 0
+ 1183 0998 40309FE5 		ldr	r3, .L86
+ 1184 099c 0C300BE5 		str	r3, [fp, #-12]
+ 586:../cyfxusbhost.c ****     status = CyU3POtgStart (&otgCfg);
+ 1185              		.loc 1 586 0
+ 1186 09a0 10304BE2 		sub	r3, fp, #16
+ 1187 09a4 0300A0E1 		mov	r0, r3
+ 1188 09a8 FEFFFFEB 		bl	CyU3POtgStart
+ 1189 09ac 08000BE5 		str	r0, [fp, #-8]
+ 587:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 1190              		.loc 1 587 0
+ 1191 09b0 08301BE5 		ldr	r3, [fp, #-8]
+ 1192 09b4 000053E3 		cmp	r3, #0
+ 1193 09b8 0100000A 		beq	.L85
+ 588:../cyfxusbhost.c ****     {
+ 589:../cyfxusbhost.c ****         return status;
+ 1194              		.loc 1 589 0
+ 1195 09bc 08301BE5 		ldr	r3, [fp, #-8]
+ 1196 09c0 030000EA 		b	.L82
+ 1197              	.L85:
+ 590:../cyfxusbhost.c ****     }
+ 591:../cyfxusbhost.c **** 
+ 592:../cyfxusbhost.c ****     /* Since VBATT or VBUS is required for OTG operation enable it. */
+ 593:../cyfxusbhost.c ****     status = CyU3PUsbVBattEnable (CyTrue);
+ 1198              		.loc 1 593 0
+ 1199 09c4 0100A0E3 		mov	r0, #1
+ 1200 09c8 FEFFFFEB 		bl	CyU3PUsbVBattEnable
+ 1201 09cc 08000BE5 		str	r0, [fp, #-8]
+ 594:../cyfxusbhost.c **** 
+ 595:../cyfxusbhost.c ****     return status;
+ 1202              		.loc 1 595 0
+ 1203 09d0 08301BE5 		ldr	r3, [fp, #-8]
+ 1204              	.L82:
+ 596:../cyfxusbhost.c **** }
+ 1205              		.loc 1 596 0
+ 1206 09d4 0300A0E1 		mov	r0, r3
+ 1207 09d8 04D04BE2 		sub	sp, fp, #4
+ 1208 09dc 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1209              	.L87:
+ 1210              		.align	2
+ 1211              	.L86:
+ 1212 09e0 00000000 		.word	CyFxOtgEventCb
+ 1213              		.cfi_endproc
+ 1214              	.LFE11:
+ 1216              		.section	.rodata
+ 1217              		.align	2
+ 1218              	.LC10:
+ 1219 00e0 4170706C 		.ascii	"Application initialized.\015\012\000"
+ 1219      69636174 
+ 1219      696F6E20 
+ 1219      696E6974 
+ 1219      69616C69 
+ 1220 00fb 00       		.align	2
+ 1221              	.LC11:
+ 1222 00fc 4170706C 		.ascii	"Application initialization failed. Aborting.\015\012"
+ 1222      69636174 
+ 1222      696F6E20 
+ 1222      696E6974 
+ 1222      69616C69 
+ 1223 012a 00       		.ascii	"\000"
+ 1224 012b 00       		.align	2
+ 1225              	.LC12:
+ 1226 012c 53776974 		.ascii	"Switch to AOA protocol\015\012\000"
+ 1226      63682074 
+ 1226      6F20414F 
+ 1226      41207072 
+ 1226      6F746F63 
+ 1227              		.text
+ 1228              		.align	2
+ 1229              		.global	ApplnThread_Entry
+ 1231              	ApplnThread_Entry:
+ 1232              	.LFB12:
+ 597:../cyfxusbhost.c **** 
+ 598:../cyfxusbhost.c **** 
+ 599:../cyfxusbhost.c **** extern uint8_t dmabuffer[16];
+ 600:../cyfxusbhost.c **** /* Entry function for the AppThread. */
+ 601:../cyfxusbhost.c **** void
+ 602:../cyfxusbhost.c **** ApplnThread_Entry (
+ 603:../cyfxusbhost.c ****         uint32_t input)
+ 604:../cyfxusbhost.c **** {
+ 1233              		.loc 1 604 0
+ 1234              		.cfi_startproc
+ 1235              		@ args = 0, pretend = 0, frame = 64
+ 1236              		@ frame_needed = 1, uses_anonymous_args = 0
+ 1237 09e4 00482DE9 		stmfd	sp!, {fp, lr}
+ 1238              	.LCFI24:
+ 1239              		.cfi_def_cfa_offset 8
+ 1240 09e8 04B08DE2 		add	fp, sp, #4
+ 1241              		.cfi_offset 14, -4
+ 1242              		.cfi_offset 11, -8
+ 1243              	.LCFI25:
+ 1244              		.cfi_def_cfa 11, 4
+ 1245 09ec 40D04DE2 		sub	sp, sp, #64
+ 1246 09f0 40000BE5 		str	r0, [fp, #-64]
+ 605:../cyfxusbhost.c ****     CyBool_t isPresent = CyFalse;
+ 1247              		.loc 1 605 0
+ 1248 09f4 0030A0E3 		mov	r3, #0
+ 1249 09f8 08300BE5 		str	r3, [fp, #-8]
+ 606:../cyfxusbhost.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 1250              		.loc 1 606 0
+ 1251 09fc 0030A0E3 		mov	r3, #0
+ 1252 0a00 10300BE5 		str	r3, [fp, #-16]
+ 607:../cyfxusbhost.c ****     uint32_t flags;
+ 608:../cyfxusbhost.c **** 
+ 609:../cyfxusbhost.c **** 	CyU3PDmaBuffer_t left_buf, right_buf, in_buf;
+ 610:../cyfxusbhost.c **** 
+ 611:../cyfxusbhost.c ****     CyU3PEventCreate(&glDMAEvent);
+ 1253              		.loc 1 611 0
+ 1254 0a04 B0029FE5 		ldr	r0, .L99
+ 1255 0a08 0010A0E3 		mov	r1, #0
+ 1256 0a0c 2820A0E3 		mov	r2, #40
+ 1257 0a10 FEFFFFEB 		bl	_txe_event_flags_create
+ 612:../cyfxusbhost.c **** 
+ 613:../cyfxusbhost.c ****     /* Initialize the debug logger. */
+ 614:../cyfxusbhost.c **** //    CyFxApplnDebugInit ();
+ 615:../cyfxusbhost.c ****     CyU3PDebugPrint (2, "Application initialized.\r\n");
+ 1258              		.loc 1 615 0
+ 1259 0a14 0200A0E3 		mov	r0, #2
+ 1260 0a18 A0129FE5 		ldr	r1, .L99+4
+ 1261 0a1c FEFFFFEB 		bl	CyU3PDebugPrint
+ 616:../cyfxusbhost.c **** 
+ 617:../cyfxusbhost.c ****     CyFxApplnI2SInit ();
+ 1262              		.loc 1 617 0
+ 1263 0a20 FEFFFFEB 		bl	CyFxApplnI2SInit
+ 618:../cyfxusbhost.c **** 
+ 619:../cyfxusbhost.c ****     /* Initialize the example application. */
+ 620:../cyfxusbhost.c ****     status = CyFxApplnInit();
+ 1264              		.loc 1 620 0
+ 1265 0a24 FEFFFFEB 		bl	CyFxApplnInit
+ 1266 0a28 10000BE5 		str	r0, [fp, #-16]
+ 621:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 1267              		.loc 1 621 0
+ 1268 0a2c 10301BE5 		ldr	r3, [fp, #-16]
+ 1269 0a30 000053E3 		cmp	r3, #0
+ 1270 0a34 0600000A 		beq	.L89
+ 622:../cyfxusbhost.c ****     {
+ 623:../cyfxusbhost.c ****         CyU3PDebugPrint (2, "Application initialization failed. Aborting.\r\n");
+ 1271              		.loc 1 623 0
+ 1272 0a38 0200A0E3 		mov	r0, #2
+ 1273 0a3c 80129FE5 		ldr	r1, .L99+8
+ 1274 0a40 FEFFFFEB 		bl	CyU3PDebugPrint
+ 624:../cyfxusbhost.c ****         CyFxAppErrorHandler (status);
+ 1275              		.loc 1 624 0
+ 1276 0a44 10001BE5 		ldr	r0, [fp, #-16]
+ 1277 0a48 FEFFFFEB 		bl	CyFxAppErrorHandler
+ 1278 0a4c 000000EA 		b	.L89
+ 1279              	.L98:
+ 625:../cyfxusbhost.c ****     }
+ 626:../cyfxusbhost.c **** 
+ 627:../cyfxusbhost.c ****     for (;;)
+ 628:../cyfxusbhost.c ****     {
+ 629:../cyfxusbhost.c **** 
+ 630:../cyfxusbhost.c **** //    	status = CyU3PEventGet(&glDMAEvent, PROD_EVENT, CYU3P_EVENT_AND, &flags, 1000);
+ 631:../cyfxusbhost.c **** //    	if(status == 0) {
+ 632:../cyfxusbhost.c **** //    		CyU3PDebugPrint(2, "prodCount -> %d; event -> 0x%x\n", prodCount, status);
+ 633:../cyfxusbhost.c **** //    	}
+ 634:../cyfxusbhost.c **** 
+ 635:../cyfxusbhost.c ****     	if(CyU3PDmaChannelGetBuffer(&glHostAoACh, &in_buf, 10) == 0)
+ 636:../cyfxusbhost.c ****     	{
+ 637:../cyfxusbhost.c ****     		uint32_t i, count = in_buf.count;
+ 638:../cyfxusbhost.c ****     		uint8_t * buf = in_buf.buffer;
+ 639:../cyfxusbhost.c ****     		lc = rc = 0;
+ 640:../cyfxusbhost.c **** 
+ 641:../cyfxusbhost.c **** 			CyU3PDmaChannelGetBuffer(&glI2SLeftCh, &left_buf, 0);
+ 642:../cyfxusbhost.c **** 			CyU3PDmaChannelGetBuffer(&glI2SRightCh, &right_buf, 0);
+ 643:../cyfxusbhost.c **** 
+ 644:../cyfxusbhost.c **** 			for(i=0; i<count; i+=4) {
+ 645:../cyfxusbhost.c **** 				left_buf.buffer[lc++] = buf[i];
+ 646:../cyfxusbhost.c **** 				left_buf.buffer[lc++] = buf[1+i];
+ 647:../cyfxusbhost.c **** 				right_buf.buffer[rc++] = buf[2+i];
+ 648:../cyfxusbhost.c **** 				right_buf.buffer[rc++] = buf[3+i];
+ 649:../cyfxusbhost.c **** 			}
+ 650:../cyfxusbhost.c **** 
+ 651:../cyfxusbhost.c **** 			CyU3PDmaChannelDiscardBuffer(&glHostAoACh);
+ 652:../cyfxusbhost.c **** 			CyU3PDmaChannelCommitBuffer(&glI2SLeftCh, count/2, 0);
+ 653:../cyfxusbhost.c **** 			CyU3PDmaChannelCommitBuffer(&glI2SRightCh, count/2, 0);
+ 654:../cyfxusbhost.c ****     	}
+ 655:../cyfxusbhost.c **** 
+ 656:../cyfxusbhost.c ****         if (isPresent != glIsPeripheralPresent)
+ 657:../cyfxusbhost.c ****         {
+ 658:../cyfxusbhost.c ****             /* Stop previously started application. */
+ 659:../cyfxusbhost.c ****             if (glIsApplnActive)
+ 660:../cyfxusbhost.c ****             {
+ 661:../cyfxusbhost.c ****                 CyFxApplnStop ();
+ 662:../cyfxusbhost.c ****             }
+ 663:../cyfxusbhost.c **** 
+ 664:../cyfxusbhost.c ****             /* If a peripheral got connected, then enumerate
+ 665:../cyfxusbhost.c ****              * and start the application. */
+ 666:../cyfxusbhost.c ****             if (glIsPeripheralPresent)
+ 667:../cyfxusbhost.c ****             {
+ 668:../cyfxusbhost.c ****                 status = CyU3PUsbHostPortEnable ();
+ 669:../cyfxusbhost.c ****                 if (status == CY_U3P_SUCCESS)
+ 670:../cyfxusbhost.c ****                 {
+ 671:../cyfxusbhost.c ****                     CyFxApplnStart ();
+ 672:../cyfxusbhost.c ****                 }
+ 673:../cyfxusbhost.c ****             }
+ 674:../cyfxusbhost.c **** 
+ 675:../cyfxusbhost.c ****             /* Update the state variable. */
+ 676:../cyfxusbhost.c ****             isPresent = glIsPeripheralPresent;
+ 677:../cyfxusbhost.c ****         }
+ 678:../cyfxusbhost.c **** 
+ 679:../cyfxusbhost.c ****         /* Since the test needs to be done from a thread,
+ 680:../cyfxusbhost.c ****          * this function is called at fixed interval. */
+ 681:../cyfxusbhost.c ****         if (glHostOwner == CY_FX_HOST_OWNER_MSC_DRIVER)
+ 682:../cyfxusbhost.c ****         {
+ 683:../cyfxusbhost.c ****             CyFxMscDriverDoWork ();
+ 684:../cyfxusbhost.c ****         }
+ 685:../cyfxusbhost.c ****         else if (glHostOwner == 3)
+ 686:../cyfxusbhost.c ****         {
+ 687:../cyfxusbhost.c ****             CyU3PDebugPrint (4, "Switch to AOA protocol\r\n");
+ 688:../cyfxusbhost.c **** 
+ 689:../cyfxusbhost.c ****         	switch_to_acc();
+ 690:../cyfxusbhost.c **** 
+ 691:../cyfxusbhost.c **** 			glHostOwner = CY_FX_HOST_OWNER_NONE;
+ 692:../cyfxusbhost.c **** 
+ 693:../cyfxusbhost.c **** 			/* Clear state variables. */
+ 694:../cyfxusbhost.c **** 			glIsApplnActive = CyFalse;
+ 695:../cyfxusbhost.c **** 
+ 696:../cyfxusbhost.c **** 			isPresent = 0;
+ 697:../cyfxusbhost.c ****         }
+ 698:../cyfxusbhost.c **** 
+ 699:../cyfxusbhost.c ****     }
+ 1280              		.loc 1 699 0
+ 1281 0a50 0000A0E1 		mov	r0, r0	@ nop
+ 1282              	.L89:
+ 635:../cyfxusbhost.c ****     	if(CyU3PDmaChannelGetBuffer(&glHostAoACh, &in_buf, 10) == 0)
+ 1283              		.loc 1 635 0
+ 1284 0a54 3C304BE2 		sub	r3, fp, #60
+ 1285 0a58 68029FE5 		ldr	r0, .L99+12
+ 1286 0a5c 0310A0E1 		mov	r1, r3
+ 1287 0a60 0A20A0E3 		mov	r2, #10
+ 1288 0a64 FEFFFFEB 		bl	CyU3PDmaChannelGetBuffer
+ 1289 0a68 0030A0E1 		mov	r3, r0
+ 1290 0a6c 000053E3 		cmp	r3, #0
+ 1291 0a70 6300001A 		bne	.L90
+ 1292              	.LBB3:
+ 637:../cyfxusbhost.c ****     		uint32_t i, count = in_buf.count;
+ 1293              		.loc 1 637 0
+ 1294 0a74 B8335BE1 		ldrh	r3, [fp, #-56]
+ 1295 0a78 14300BE5 		str	r3, [fp, #-20]
+ 638:../cyfxusbhost.c ****     		uint8_t * buf = in_buf.buffer;
+ 1296              		.loc 1 638 0
+ 1297 0a7c 3C301BE5 		ldr	r3, [fp, #-60]
+ 1298 0a80 18300BE5 		str	r3, [fp, #-24]
+ 639:../cyfxusbhost.c ****     		lc = rc = 0;
+ 1299              		.loc 1 639 0
+ 1300 0a84 40329FE5 		ldr	r3, .L99+16
+ 1301 0a88 0020A0E3 		mov	r2, #0
+ 1302 0a8c 002083E5 		str	r2, [r3, #0]
+ 1303 0a90 34329FE5 		ldr	r3, .L99+16
+ 1304 0a94 002093E5 		ldr	r2, [r3, #0]
+ 1305 0a98 30329FE5 		ldr	r3, .L99+20
+ 1306 0a9c 002083E5 		str	r2, [r3, #0]
+ 641:../cyfxusbhost.c **** 			CyU3PDmaChannelGetBuffer(&glI2SLeftCh, &left_buf, 0);
+ 1307              		.loc 1 641 0
+ 1308 0aa0 24304BE2 		sub	r3, fp, #36
+ 1309 0aa4 28029FE5 		ldr	r0, .L99+24
+ 1310 0aa8 0310A0E1 		mov	r1, r3
+ 1311 0aac 0020A0E3 		mov	r2, #0
+ 1312 0ab0 FEFFFFEB 		bl	CyU3PDmaChannelGetBuffer
+ 642:../cyfxusbhost.c **** 			CyU3PDmaChannelGetBuffer(&glI2SRightCh, &right_buf, 0);
+ 1313              		.loc 1 642 0
+ 1314 0ab4 30304BE2 		sub	r3, fp, #48
+ 1315 0ab8 18029FE5 		ldr	r0, .L99+28
+ 1316 0abc 0310A0E1 		mov	r1, r3
+ 1317 0ac0 0020A0E3 		mov	r2, #0
+ 1318 0ac4 FEFFFFEB 		bl	CyU3PDmaChannelGetBuffer
+ 644:../cyfxusbhost.c **** 			for(i=0; i<count; i+=4) {
+ 1319              		.loc 1 644 0
+ 1320 0ac8 0030A0E3 		mov	r3, #0
+ 1321 0acc 0C300BE5 		str	r3, [fp, #-12]
+ 1322 0ad0 350000EA 		b	.L91
+ 1323              	.L92:
+ 645:../cyfxusbhost.c **** 				left_buf.buffer[lc++] = buf[i];
+ 1324              		.loc 1 645 0 discriminator 2
+ 1325 0ad4 24201BE5 		ldr	r2, [fp, #-36]
+ 1326 0ad8 F0319FE5 		ldr	r3, .L99+20
+ 1327 0adc 003093E5 		ldr	r3, [r3, #0]
+ 1328 0ae0 032082E0 		add	r2, r2, r3
+ 1329 0ae4 18001BE5 		ldr	r0, [fp, #-24]
+ 1330 0ae8 0C101BE5 		ldr	r1, [fp, #-12]
+ 1331 0aec 011080E0 		add	r1, r0, r1
+ 1332 0af0 0010D1E5 		ldrb	r1, [r1, #0]	@ zero_extendqisi2
+ 1333 0af4 0010C2E5 		strb	r1, [r2, #0]
+ 1334 0af8 012083E2 		add	r2, r3, #1
+ 1335 0afc CC319FE5 		ldr	r3, .L99+20
+ 1336 0b00 002083E5 		str	r2, [r3, #0]
+ 646:../cyfxusbhost.c **** 				left_buf.buffer[lc++] = buf[1+i];
+ 1337              		.loc 1 646 0 discriminator 2
+ 1338 0b04 24201BE5 		ldr	r2, [fp, #-36]
+ 1339 0b08 C0319FE5 		ldr	r3, .L99+20
+ 1340 0b0c 003093E5 		ldr	r3, [r3, #0]
+ 1341 0b10 032082E0 		add	r2, r2, r3
+ 1342 0b14 0C101BE5 		ldr	r1, [fp, #-12]
+ 1343 0b18 011081E2 		add	r1, r1, #1
+ 1344 0b1c 18001BE5 		ldr	r0, [fp, #-24]
+ 1345 0b20 011080E0 		add	r1, r0, r1
+ 1346 0b24 0010D1E5 		ldrb	r1, [r1, #0]	@ zero_extendqisi2
+ 1347 0b28 0010C2E5 		strb	r1, [r2, #0]
+ 1348 0b2c 012083E2 		add	r2, r3, #1
+ 1349 0b30 98319FE5 		ldr	r3, .L99+20
+ 1350 0b34 002083E5 		str	r2, [r3, #0]
+ 647:../cyfxusbhost.c **** 				right_buf.buffer[rc++] = buf[2+i];
+ 1351              		.loc 1 647 0 discriminator 2
+ 1352 0b38 30201BE5 		ldr	r2, [fp, #-48]
+ 1353 0b3c 88319FE5 		ldr	r3, .L99+16
+ 1354 0b40 003093E5 		ldr	r3, [r3, #0]
+ 1355 0b44 032082E0 		add	r2, r2, r3
+ 1356 0b48 0C101BE5 		ldr	r1, [fp, #-12]
+ 1357 0b4c 021081E2 		add	r1, r1, #2
+ 1358 0b50 18001BE5 		ldr	r0, [fp, #-24]
+ 1359 0b54 011080E0 		add	r1, r0, r1
+ 1360 0b58 0010D1E5 		ldrb	r1, [r1, #0]	@ zero_extendqisi2
+ 1361 0b5c 0010C2E5 		strb	r1, [r2, #0]
+ 1362 0b60 012083E2 		add	r2, r3, #1
+ 1363 0b64 60319FE5 		ldr	r3, .L99+16
+ 1364 0b68 002083E5 		str	r2, [r3, #0]
+ 648:../cyfxusbhost.c **** 				right_buf.buffer[rc++] = buf[3+i];
+ 1365              		.loc 1 648 0 discriminator 2
+ 1366 0b6c 30201BE5 		ldr	r2, [fp, #-48]
+ 1367 0b70 54319FE5 		ldr	r3, .L99+16
+ 1368 0b74 003093E5 		ldr	r3, [r3, #0]
+ 1369 0b78 032082E0 		add	r2, r2, r3
+ 1370 0b7c 0C101BE5 		ldr	r1, [fp, #-12]
+ 1371 0b80 031081E2 		add	r1, r1, #3
+ 1372 0b84 18001BE5 		ldr	r0, [fp, #-24]
+ 1373 0b88 011080E0 		add	r1, r0, r1
+ 1374 0b8c 0010D1E5 		ldrb	r1, [r1, #0]	@ zero_extendqisi2
+ 1375 0b90 0010C2E5 		strb	r1, [r2, #0]
+ 1376 0b94 012083E2 		add	r2, r3, #1
+ 1377 0b98 2C319FE5 		ldr	r3, .L99+16
+ 1378 0b9c 002083E5 		str	r2, [r3, #0]
+ 644:../cyfxusbhost.c **** 			for(i=0; i<count; i+=4) {
+ 1379              		.loc 1 644 0 discriminator 2
+ 1380 0ba0 0C301BE5 		ldr	r3, [fp, #-12]
+ 1381 0ba4 043083E2 		add	r3, r3, #4
+ 1382 0ba8 0C300BE5 		str	r3, [fp, #-12]
+ 1383              	.L91:
+ 644:../cyfxusbhost.c **** 			for(i=0; i<count; i+=4) {
+ 1384              		.loc 1 644 0 is_stmt 0 discriminator 1
+ 1385 0bac 0C201BE5 		ldr	r2, [fp, #-12]
+ 1386 0bb0 14301BE5 		ldr	r3, [fp, #-20]
+ 1387 0bb4 030052E1 		cmp	r2, r3
+ 1388 0bb8 C5FFFF3A 		bcc	.L92
+ 651:../cyfxusbhost.c **** 			CyU3PDmaChannelDiscardBuffer(&glHostAoACh);
+ 1389              		.loc 1 651 0 is_stmt 1
+ 1390 0bbc 04019FE5 		ldr	r0, .L99+12
+ 1391 0bc0 FEFFFFEB 		bl	CyU3PDmaChannelDiscardBuffer
+ 652:../cyfxusbhost.c **** 			CyU3PDmaChannelCommitBuffer(&glI2SLeftCh, count/2, 0);
+ 1392              		.loc 1 652 0
+ 1393 0bc4 14301BE5 		ldr	r3, [fp, #-20]
+ 1394 0bc8 A330A0E1 		mov	r3, r3, lsr #1
+ 1395 0bcc 0338A0E1 		mov	r3, r3, asl #16
+ 1396 0bd0 2338A0E1 		mov	r3, r3, lsr #16
+ 1397 0bd4 F8009FE5 		ldr	r0, .L99+24
+ 1398 0bd8 0310A0E1 		mov	r1, r3
+ 1399 0bdc 0020A0E3 		mov	r2, #0
+ 1400 0be0 FEFFFFEB 		bl	CyU3PDmaChannelCommitBuffer
+ 653:../cyfxusbhost.c **** 			CyU3PDmaChannelCommitBuffer(&glI2SRightCh, count/2, 0);
+ 1401              		.loc 1 653 0
+ 1402 0be4 14301BE5 		ldr	r3, [fp, #-20]
+ 1403 0be8 A330A0E1 		mov	r3, r3, lsr #1
+ 1404 0bec 0338A0E1 		mov	r3, r3, asl #16
+ 1405 0bf0 2338A0E1 		mov	r3, r3, lsr #16
+ 1406 0bf4 DC009FE5 		ldr	r0, .L99+28
+ 1407 0bf8 0310A0E1 		mov	r1, r3
+ 1408 0bfc 0020A0E3 		mov	r2, #0
+ 1409 0c00 FEFFFFEB 		bl	CyU3PDmaChannelCommitBuffer
+ 1410              	.L90:
+ 1411              	.LBE3:
+ 656:../cyfxusbhost.c ****         if (isPresent != glIsPeripheralPresent)
+ 1412              		.loc 1 656 0
+ 1413 0c04 D0309FE5 		ldr	r3, .L99+32
+ 1414 0c08 003093E5 		ldr	r3, [r3, #0]
+ 1415 0c0c 08201BE5 		ldr	r2, [fp, #-8]
+ 1416 0c10 030052E1 		cmp	r2, r3
+ 1417 0c14 1100000A 		beq	.L93
+ 659:../cyfxusbhost.c ****             if (glIsApplnActive)
+ 1418              		.loc 1 659 0
+ 1419 0c18 C0309FE5 		ldr	r3, .L99+36
+ 1420 0c1c 003093E5 		ldr	r3, [r3, #0]
+ 1421 0c20 000053E3 		cmp	r3, #0
+ 1422 0c24 0000000A 		beq	.L94
+ 661:../cyfxusbhost.c ****                 CyFxApplnStop ();
+ 1423              		.loc 1 661 0
+ 1424 0c28 FEFFFFEB 		bl	CyFxApplnStop
+ 1425              	.L94:
+ 666:../cyfxusbhost.c ****             if (glIsPeripheralPresent)
+ 1426              		.loc 1 666 0
+ 1427 0c2c A8309FE5 		ldr	r3, .L99+32
+ 1428 0c30 003093E5 		ldr	r3, [r3, #0]
+ 1429 0c34 000053E3 		cmp	r3, #0
+ 1430 0c38 0500000A 		beq	.L95
+ 668:../cyfxusbhost.c ****                 status = CyU3PUsbHostPortEnable ();
+ 1431              		.loc 1 668 0
+ 1432 0c3c FEFFFFEB 		bl	CyU3PUsbHostPortEnable
+ 1433 0c40 10000BE5 		str	r0, [fp, #-16]
+ 669:../cyfxusbhost.c ****                 if (status == CY_U3P_SUCCESS)
+ 1434              		.loc 1 669 0
+ 1435 0c44 10301BE5 		ldr	r3, [fp, #-16]
+ 1436 0c48 000053E3 		cmp	r3, #0
+ 1437 0c4c 0000001A 		bne	.L95
+ 671:../cyfxusbhost.c ****                     CyFxApplnStart ();
+ 1438              		.loc 1 671 0
+ 1439 0c50 FEFFFFEB 		bl	CyFxApplnStart
+ 1440              	.L95:
+ 676:../cyfxusbhost.c ****             isPresent = glIsPeripheralPresent;
+ 1441              		.loc 1 676 0
+ 1442 0c54 80309FE5 		ldr	r3, .L99+32
+ 1443 0c58 003093E5 		ldr	r3, [r3, #0]
+ 1444 0c5c 08300BE5 		str	r3, [fp, #-8]
+ 1445              	.L93:
+ 681:../cyfxusbhost.c ****         if (glHostOwner == CY_FX_HOST_OWNER_MSC_DRIVER)
+ 1446              		.loc 1 681 0
+ 1447 0c60 7C309FE5 		ldr	r3, .L99+40
+ 1448 0c64 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1449 0c68 020053E3 		cmp	r3, #2
+ 1450 0c6c 0100001A 		bne	.L96
+ 683:../cyfxusbhost.c ****             CyFxMscDriverDoWork ();
+ 1451              		.loc 1 683 0
+ 1452 0c70 FEFFFFEB 		bl	CyFxMscDriverDoWork
+ 1453              		.loc 1 699 0
+ 1454 0c74 76FFFFEA 		b	.L89
+ 1455              	.L96:
+ 685:../cyfxusbhost.c ****         else if (glHostOwner == 3)
+ 1456              		.loc 1 685 0
+ 1457 0c78 64309FE5 		ldr	r3, .L99+40
+ 1458 0c7c 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1459 0c80 030053E3 		cmp	r3, #3
+ 1460 0c84 71FFFF1A 		bne	.L98
+ 1461              	.LBB4:
+ 687:../cyfxusbhost.c ****             CyU3PDebugPrint (4, "Switch to AOA protocol\r\n");
+ 1462              		.loc 1 687 0
+ 1463 0c88 0400A0E3 		mov	r0, #4
+ 1464 0c8c 54109FE5 		ldr	r1, .L99+44
+ 1465 0c90 FEFFFFEB 		bl	CyU3PDebugPrint
+ 689:../cyfxusbhost.c ****         	switch_to_acc();
+ 1466              		.loc 1 689 0
+ 1467 0c94 FEFFFFEB 		bl	switch_to_acc
+ 691:../cyfxusbhost.c **** 			glHostOwner = CY_FX_HOST_OWNER_NONE;
+ 1468              		.loc 1 691 0
+ 1469 0c98 44309FE5 		ldr	r3, .L99+40
+ 1470 0c9c 0020A0E3 		mov	r2, #0
+ 1471 0ca0 0020C3E5 		strb	r2, [r3, #0]
+ 694:../cyfxusbhost.c **** 			glIsApplnActive = CyFalse;
+ 1472              		.loc 1 694 0
+ 1473 0ca4 34309FE5 		ldr	r3, .L99+36
+ 1474 0ca8 0020A0E3 		mov	r2, #0
+ 1475 0cac 002083E5 		str	r2, [r3, #0]
+ 696:../cyfxusbhost.c **** 			isPresent = 0;
+ 1476              		.loc 1 696 0
+ 1477 0cb0 0030A0E3 		mov	r3, #0
+ 1478 0cb4 08300BE5 		str	r3, [fp, #-8]
+ 1479              	.LBE4:
+ 1480              		.loc 1 699 0
+ 1481 0cb8 65FFFFEA 		b	.L89
+ 1482              	.L100:
+ 1483              		.align	2
+ 1484              	.L99:
+ 1485 0cbc 00000000 		.word	glDMAEvent
+ 1486 0cc0 E0000000 		.word	.LC10
+ 1487 0cc4 FC000000 		.word	.LC11
+ 1488 0cc8 00000000 		.word	glHostAoACh
+ 1489 0ccc 00000000 		.word	rc
+ 1490 0cd0 00000000 		.word	lc
+ 1491 0cd4 00000000 		.word	glI2SLeftCh
+ 1492 0cd8 00000000 		.word	glI2SRightCh
+ 1493 0cdc 00000000 		.word	glIsPeripheralPresent
+ 1494 0ce0 00000000 		.word	glIsApplnActive
+ 1495 0ce4 00000000 		.word	glHostOwner
+ 1496 0ce8 2C010000 		.word	.LC12
+ 1497              		.cfi_endproc
+ 1498              	.LFE12:
+ 1500              		.section	.rodata
+ 1501 0145 000000   		.align	2
+ 1502              	.LC13:
+ 1503 0148 32313A55 		.ascii	"21:USB_DEBUG\000"
+ 1503      53425F44 
+ 1503      45425547 
+ 1503      00
+ 1504              		.text
+ 1505              		.align	2
+ 1506              		.global	CyFxApplicationDefine
+ 1508              	CyFxApplicationDefine:
+ 1509              	.LFB13:
+ 700:../cyfxusbhost.c **** }
+ 701:../cyfxusbhost.c **** 
+ 702:../cyfxusbhost.c **** /* Application define function which creates the threads. */
+ 703:../cyfxusbhost.c **** void
+ 704:../cyfxusbhost.c **** CyFxApplicationDefine (
+ 705:../cyfxusbhost.c ****         void)
+ 706:../cyfxusbhost.c **** {
+ 1510              		.loc 1 706 0
+ 1511              		.cfi_startproc
+ 1512              		@ args = 0, pretend = 0, frame = 8
+ 1513              		@ frame_needed = 1, uses_anonymous_args = 0
+ 1514 0cec 00482DE9 		stmfd	sp!, {fp, lr}
+ 1515              	.LCFI26:
+ 1516              		.cfi_def_cfa_offset 8
+ 1517 0cf0 04B08DE2 		add	fp, sp, #4
+ 1518              		.cfi_offset 14, -4
+ 1519              		.cfi_offset 11, -8
+ 1520              	.LCFI27:
+ 1521              		.cfi_def_cfa 11, 4
+ 1522 0cf4 28D04DE2 		sub	sp, sp, #40
+ 707:../cyfxusbhost.c ****     void *ptr = NULL;
+ 1523              		.loc 1 707 0
+ 1524 0cf8 0030A0E3 		mov	r3, #0
+ 1525 0cfc 08300BE5 		str	r3, [fp, #-8]
+ 708:../cyfxusbhost.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 1526              		.loc 1 708 0
+ 1527 0d00 0030A0E3 		mov	r3, #0
+ 1528 0d04 0C300BE5 		str	r3, [fp, #-12]
+ 709:../cyfxusbhost.c **** 
+ 710:../cyfxusbhost.c ****     /* Allocate the memory for the threads */
+ 711:../cyfxusbhost.c ****     ptr = CyU3PMemAlloc (CY_FX_APPLN_THREAD_STACK);
+ 1529              		.loc 1 711 0
+ 1530 0d08 010AA0E3 		mov	r0, #4096
+ 1531 0d0c FEFFFFEB 		bl	CyU3PMemAlloc
+ 1532 0d10 08000BE5 		str	r0, [fp, #-8]
+ 712:../cyfxusbhost.c **** 
+ 713:../cyfxusbhost.c ****     /* Create the thread for the application */
+ 714:../cyfxusbhost.c ****     status = CyU3PThreadCreate (&applnThread,               /* App Thread structure */
+ 1533              		.loc 1 714 0
+ 1534 0d14 08301BE5 		ldr	r3, [fp, #-8]
+ 1535 0d18 00308DE5 		str	r3, [sp, #0]
+ 1536 0d1c 013AA0E3 		mov	r3, #4096
+ 1537 0d20 04308DE5 		str	r3, [sp, #4]
+ 1538 0d24 0830A0E3 		mov	r3, #8
+ 1539 0d28 08308DE5 		str	r3, [sp, #8]
+ 1540 0d2c 0830A0E3 		mov	r3, #8
+ 1541 0d30 0C308DE5 		str	r3, [sp, #12]
+ 1542 0d34 0030A0E3 		mov	r3, #0
+ 1543 0d38 10308DE5 		str	r3, [sp, #16]
+ 1544 0d3c 0130A0E3 		mov	r3, #1
+ 1545 0d40 14308DE5 		str	r3, [sp, #20]
+ 1546 0d44 A830A0E3 		mov	r3, #168
+ 1547 0d48 18308DE5 		str	r3, [sp, #24]
+ 1548 0d4c 28009FE5 		ldr	r0, .L104
+ 1549 0d50 28109FE5 		ldr	r1, .L104+4
+ 1550 0d54 28209FE5 		ldr	r2, .L104+8
+ 1551 0d58 0030A0E3 		mov	r3, #0
+ 1552 0d5c FEFFFFEB 		bl	_txe_thread_create
+ 1553 0d60 0C000BE5 		str	r0, [fp, #-12]
+ 715:../cyfxusbhost.c ****                           "21:USB_DEBUG",                   /* Thread ID and Thread name */
+ 716:../cyfxusbhost.c ****                           ApplnThread_Entry,                /* App Thread Entry function */
+ 717:../cyfxusbhost.c ****                           0,                                /* No input parameter to thread */
+ 718:../cyfxusbhost.c ****                           ptr,                              /* Pointer to the allocated thread stac
+ 719:../cyfxusbhost.c ****                           CY_FX_APPLN_THREAD_STACK,         /* App Thread stack size */
+ 720:../cyfxusbhost.c ****                           CY_FX_APPLN_THREAD_PRIORITY,      /* App Thread priority */
+ 721:../cyfxusbhost.c ****                           CY_FX_APPLN_THREAD_PRIORITY,      /* App Thread pre-emption threshold */
+ 722:../cyfxusbhost.c ****                           CYU3P_NO_TIME_SLICE,              /* No time slice for the application th
+ 723:../cyfxusbhost.c ****                           CYU3P_AUTO_START                  /* Start the Thread immediately */
+ 724:../cyfxusbhost.c ****                           );
+ 725:../cyfxusbhost.c **** 
+ 726:../cyfxusbhost.c ****     /* Check the return code */
+ 727:../cyfxusbhost.c ****     if (status != 0)
+ 1554              		.loc 1 727 0
+ 1555 0d64 0C301BE5 		ldr	r3, [fp, #-12]
+ 1556 0d68 000053E3 		cmp	r3, #0
+ 1557 0d6c 0000000A 		beq	.L101
+ 1558              	.L103:
+ 728:../cyfxusbhost.c ****     {
+ 729:../cyfxusbhost.c ****         /* Add custom recovery or debug actions here */
+ 730:../cyfxusbhost.c **** 
+ 731:../cyfxusbhost.c ****         /* Application cannot continue */
+ 732:../cyfxusbhost.c ****         /* Loop indefinitely */
+ 733:../cyfxusbhost.c ****         while(1);
+ 1559              		.loc 1 733 0 discriminator 1
+ 1560 0d70 FEFFFFEA 		b	.L103
+ 1561              	.L101:
+ 734:../cyfxusbhost.c ****     }
+ 735:../cyfxusbhost.c **** }
+ 1562              		.loc 1 735 0
+ 1563 0d74 04D04BE2 		sub	sp, fp, #4
+ 1564 0d78 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1565              	.L105:
+ 1566              		.align	2
+ 1567              	.L104:
+ 1568 0d7c 00000000 		.word	applnThread
+ 1569 0d80 48010000 		.word	.LC13
+ 1570 0d84 00000000 		.word	ApplnThread_Entry
+ 1571              		.cfi_endproc
+ 1572              	.LFE13:
+ 1574              		.align	2
+ 1575              		.global	main
+ 1577              	main:
+ 1578              	.LFB14:
+ 736:../cyfxusbhost.c **** 
+ 737:../cyfxusbhost.c **** /*
+ 738:../cyfxusbhost.c ****  * Main function
+ 739:../cyfxusbhost.c ****  */
+ 740:../cyfxusbhost.c **** int
+ 741:../cyfxusbhost.c **** main (void)
+ 742:../cyfxusbhost.c **** {
+ 1579              		.loc 1 742 0
+ 1580              		.cfi_startproc
+ 1581              		@ args = 0, pretend = 0, frame = 48
+ 1582              		@ frame_needed = 1, uses_anonymous_args = 0
+ 1583 0d88 00482DE9 		stmfd	sp!, {fp, lr}
+ 1584              	.LCFI28:
+ 1585              		.cfi_def_cfa_offset 8
+ 1586 0d8c 04B08DE2 		add	fp, sp, #4
+ 1587              		.cfi_offset 14, -4
+ 1588              		.cfi_offset 11, -8
+ 1589              	.LCFI29:
+ 1590              		.cfi_def_cfa 11, 4
+ 1591 0d90 30D04DE2 		sub	sp, sp, #48
+ 743:../cyfxusbhost.c ****     CyU3PIoMatrixConfig_t io_cfg;
+ 744:../cyfxusbhost.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 1592              		.loc 1 744 0
+ 1593 0d94 0030A0E3 		mov	r3, #0
+ 1594 0d98 08300BE5 		str	r3, [fp, #-8]
+ 745:../cyfxusbhost.c **** 
+ 746:../cyfxusbhost.c ****     /* Initialize the device */
+ 747:../cyfxusbhost.c ****     status = CyU3PDeviceInit (NULL);
+ 1595              		.loc 1 747 0
+ 1596 0d9c 0000A0E3 		mov	r0, #0
+ 1597 0da0 FEFFFFEB 		bl	CyU3PDeviceInit
+ 1598 0da4 08000BE5 		str	r0, [fp, #-8]
+ 748:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 1599              		.loc 1 748 0
+ 1600 0da8 08301BE5 		ldr	r3, [fp, #-8]
+ 1601 0dac 000053E3 		cmp	r3, #0
+ 1602 0db0 0000000A 		beq	.L107
+ 749:../cyfxusbhost.c ****     {
+ 750:../cyfxusbhost.c ****         goto handle_fatal_error;
+ 1603              		.loc 1 750 0
+ 1604 0db4 290000EA 		b	.L108
+ 1605              	.L107:
+ 751:../cyfxusbhost.c ****     }
+ 752:../cyfxusbhost.c **** 
+ 753:../cyfxusbhost.c ****     /* Initialize the caches. Enable both Instruction and Data Caches. */
+ 754:../cyfxusbhost.c ****     status = CyU3PDeviceCacheControl (CyTrue, CyFalse, CyFalse);
+ 1606              		.loc 1 754 0
+ 1607 0db8 0100A0E3 		mov	r0, #1
+ 1608 0dbc 0010A0E3 		mov	r1, #0
+ 1609 0dc0 0020A0E3 		mov	r2, #0
+ 1610 0dc4 FEFFFFEB 		bl	CyU3PDeviceCacheControl
+ 1611 0dc8 08000BE5 		str	r0, [fp, #-8]
+ 755:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 1612              		.loc 1 755 0
+ 1613 0dcc 08301BE5 		ldr	r3, [fp, #-8]
+ 1614 0dd0 000053E3 		cmp	r3, #0
+ 1615 0dd4 0000000A 		beq	.L109
+ 756:../cyfxusbhost.c ****     {
+ 757:../cyfxusbhost.c ****         goto handle_fatal_error;
+ 1616              		.loc 1 757 0
+ 1617 0dd8 200000EA 		b	.L108
+ 1618              	.L109:
+ 758:../cyfxusbhost.c ****     }
+ 759:../cyfxusbhost.c **** 
+ 760:../cyfxusbhost.c ****     /* Configure the IO matrix for the device. On the FX3 DVK board, the COM port 
+ 761:../cyfxusbhost.c ****      * is connected to the IO(53:56). This means that either DQ32 mode should be
+ 762:../cyfxusbhost.c ****      * selected or lppMode should be set to UART_ONLY. Here we are choosing
+ 763:../cyfxusbhost.c ****      * UART_ONLY configuration. */
+ 764:../cyfxusbhost.c ****     io_cfg.isDQ32Bit = CyFalse;
+ 1619              		.loc 1 764 0
+ 1620 0ddc 0030A0E3 		mov	r3, #0
+ 1621 0de0 30300BE5 		str	r3, [fp, #-48]
+ 765:../cyfxusbhost.c ****     io_cfg.useUart   = CyTrue;
+ 1622              		.loc 1 765 0
+ 1623 0de4 0130A0E3 		mov	r3, #1
+ 1624 0de8 2C300BE5 		str	r3, [fp, #-44]
+ 766:../cyfxusbhost.c ****     io_cfg.useI2C    = CyFalse;
+ 1625              		.loc 1 766 0
+ 1626 0dec 0030A0E3 		mov	r3, #0
+ 1627 0df0 28300BE5 		str	r3, [fp, #-40]
+ 767:../cyfxusbhost.c ****     io_cfg.useI2S    = CyTrue;
+ 1628              		.loc 1 767 0
+ 1629 0df4 0130A0E3 		mov	r3, #1
+ 1630 0df8 24300BE5 		str	r3, [fp, #-36]
+ 768:../cyfxusbhost.c ****     io_cfg.useSpi    = CyTrue;
+ 1631              		.loc 1 768 0
+ 1632 0dfc 0130A0E3 		mov	r3, #1
+ 1633 0e00 20300BE5 		str	r3, [fp, #-32]
+ 769:../cyfxusbhost.c ****     io_cfg.lppMode   = CY_U3P_IO_MATRIX_LPP_DEFAULT;
+ 1634              		.loc 1 769 0
+ 1635 0e04 0030A0E3 		mov	r3, #0
+ 1636 0e08 1A304BE5 		strb	r3, [fp, #-26]
+ 770:../cyfxusbhost.c ****     /* GPIO 21 is enabled for VBUS control. But since this IO is part of p-port
+ 771:../cyfxusbhost.c ****      * it has to be overridden. Here no GPIO is enabled. */
+ 772:../cyfxusbhost.c ****     io_cfg.gpioSimpleEn[0]  = 0;
+ 1637              		.loc 1 772 0
+ 1638 0e0c 0030A0E3 		mov	r3, #0
+ 1639 0e10 18300BE5 		str	r3, [fp, #-24]
+ 773:../cyfxusbhost.c ****     io_cfg.gpioSimpleEn[1]  = 0;
+ 1640              		.loc 1 773 0
+ 1641 0e14 0030A0E3 		mov	r3, #0
+ 1642 0e18 14300BE5 		str	r3, [fp, #-20]
+ 774:../cyfxusbhost.c ****     io_cfg.gpioComplexEn[0] = 0;
+ 1643              		.loc 1 774 0
+ 1644 0e1c 0030A0E3 		mov	r3, #0
+ 1645 0e20 10300BE5 		str	r3, [fp, #-16]
+ 775:../cyfxusbhost.c ****     io_cfg.gpioComplexEn[1] = 0;
+ 1646              		.loc 1 775 0
+ 1647 0e24 0030A0E3 		mov	r3, #0
+ 1648 0e28 0C300BE5 		str	r3, [fp, #-12]
+ 776:../cyfxusbhost.c ****     status = CyU3PDeviceConfigureIOMatrix (&io_cfg);
+ 1649              		.loc 1 776 0
+ 1650 0e2c 30304BE2 		sub	r3, fp, #48
+ 1651 0e30 0300A0E1 		mov	r0, r3
+ 1652 0e34 FEFFFFEB 		bl	CyU3PDeviceConfigureIOMatrix
+ 1653 0e38 08000BE5 		str	r0, [fp, #-8]
+ 777:../cyfxusbhost.c ****     if (status != CY_U3P_SUCCESS)
+ 1654              		.loc 1 777 0
+ 1655 0e3c 08301BE5 		ldr	r3, [fp, #-8]
+ 1656 0e40 000053E3 		cmp	r3, #0
+ 1657 0e44 0000000A 		beq	.L110
+ 778:../cyfxusbhost.c ****     {
+ 779:../cyfxusbhost.c ****         goto handle_fatal_error;
+ 1658              		.loc 1 779 0
+ 1659 0e48 040000EA 		b	.L108
+ 1660              	.L110:
+ 780:../cyfxusbhost.c ****     }
+ 781:../cyfxusbhost.c **** 
+ 782:../cyfxusbhost.c ****     /* This is a non returnable call for initializing the RTOS kernel */
+ 783:../cyfxusbhost.c ****     CyU3PKernelEntry ();
+ 1661              		.loc 1 783 0
+ 1662 0e4c FEFFFFEB 		bl	_tx_initialize_kernel_enter
+ 784:../cyfxusbhost.c **** 
+ 785:../cyfxusbhost.c ****     /* Dummy return to make the compiler happy */
+ 786:../cyfxusbhost.c ****     return 0;
+ 1663              		.loc 1 786 0
+ 1664 0e50 0030A0E3 		mov	r3, #0
+ 787:../cyfxusbhost.c **** 
+ 788:../cyfxusbhost.c **** handle_fatal_error:
+ 789:../cyfxusbhost.c **** 
+ 790:../cyfxusbhost.c ****     /* Cannot recover from this error. */
+ 791:../cyfxusbhost.c ****     while (1);
+ 792:../cyfxusbhost.c **** }
+ 1665              		.loc 1 792 0
+ 1666 0e54 0300A0E1 		mov	r0, r3
+ 1667 0e58 04D04BE2 		sub	sp, fp, #4
+ 1668 0e5c 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1669              	.L108:
+ 791:../cyfxusbhost.c ****     while (1);
+ 1670              		.loc 1 791 0 discriminator 1
+ 1671 0e60 FEFFFFEA 		b	.L108
+ 1672              		.cfi_endproc
+ 1673              	.LFE14:
+ 1675              		.section	.rodata
+ 1676 0155 000000   		.align	2
+ 1679              	C.18.8639:
+ 1680 0158 00000000 		.word	0
+ 1681 015c 00000000 		.word	0
+ 1682 0160 01000000 		.word	1
+ 1683 0164 00       		.byte	0
+ 1684 0165 000000   		.space	3
+ 1685 0168 44AC0000 		.word	44100
+ 1686 016c 01       		.byte	1
+ 1687 016d 000000   		.space	3
+ 1688              		.text
+ 1689              	.Letext0:
+DEFINED SYMBOLS
+                            *ABS*:00000000 cyfxusbhost.c
+                            *COM*:00000028 glDMAEvent
+                            *COM*:000000a0 glHostAoACh
+                            *COM*:000000a0 glI2SRightCh
+                            *COM*:000000a0 glI2SLeftCh
+                            *COM*:00000004 prodCount
+                            *COM*:00000004 consCount
+                            *COM*:00000004 bufCount
+                            *COM*:00000004 lc
+                            *COM*:00000004 rc
+                            *COM*:000000a8 applnThread
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:36     .bss:00000000 glIsApplnActive
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:33     .bss:00000000 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:42     .bss:00000004 glIsPeripheralPresent
+                            *COM*:00000020 glSetupPkt
+                            *COM*:00000200 glEp0Buffer
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:49     .bss:00000008 glHostOwner
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:52     .text:00000000 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:55     .text:00000000 CyFxAppErrorHandler
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:79     .rodata:00000000 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:89     .text:00000014 CyFxApplnI2SInit
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:151    .text:000000a0 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1679   .rodata:00000158 C.18.8639
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:157    .text:000000ac $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:160    .text:000000ac CyFxApplnDebugInit
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:264    .text:000001a4 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:273    .text:000001a8 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:276    .text:000001a8 CyFxHostEventCb
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:322    .text:00000208 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:332    .text:00000210 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:335    .text:00000210 CyFxSendSetupRqt
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:447    .text:00000340 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:464    .text:0000034c $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:467    .text:0000034c CyFxApplnStart
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:741    .text:0000063c $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:751    .text:00000658 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:754    .text:00000658 CyFxApplnStop
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:802    .text:000006b0 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:807    .text:000006b8 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:810    .text:000006b8 CyFxUsbHostStart
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:850    .text:00000700 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:854    .text:00000704 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:857    .text:00000704 CyFxUsbHostStop
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:886    .text:00000728 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:898    .text:0000072c $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:901    .text:0000072c CyFxUsbVBusControl
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:951    .text:00000794 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:961    .text:0000079c $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:964    .text:0000079c CyFxOtgEventCb
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1077   .text:000008a4 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1081   .text:000008a8 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1084   .text:000008a8 CyFxApplnInit
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1212   .text:000009e0 $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1228   .text:000009e4 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1231   .text:000009e4 ApplnThread_Entry
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1485   .text:00000cbc $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1505   .text:00000cec $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1508   .text:00000cec CyFxApplicationDefine
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1568   .text:00000d7c $d
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1574   .text:00000d88 $a
+C:\Users\kumr\AppData\Local\Temp\ccfjEwM6.s:1577   .text:00000d88 main
+                     .debug_frame:00000010 $d
+
+UNDEFINED SYMBOLS
+CyU3PI2sInit
+CyU3PDebugPrint
+CyU3PI2sSetConfig
+CyU3PUartInit
+CyU3PMemSet
+CyU3PUartSetConfig
+CyU3PUartTxSetBlockXfer
+CyU3PDebugInit
+CyU3PDebugPreamble
+CyU3PUsbHostSendSetupRqt
+CyU3PUsbHostEpWaitForCompletion
+_tx_thread_sleep
+CyU3PUsbHostEpAdd
+CyU3PUsbHostEpRemove
+CyU3PUsbHostSetDeviceAddress
+CyFxAOADriverInit
+CyU3PUsbHostPortDisable
+CyFxMouseDriverDeInit
+CyFxMscDriverDeInit
+CyU3PUsbHostStart
+CyU3PUsbHostStop
+CyU3POtgIsVBusValid
+CyU3PGpioSimpleSetValue
+CyU3POtgIsHostMode
+CyU3PUsbHostIsStarted
+CyU3PGpioInit
+CyU3PDeviceGpioOverride
+CyU3PGpioSetSimpleConfig
+CyU3POtgStart
+CyU3PUsbVBattEnable
+_txe_event_flags_create
+CyU3PDmaChannelGetBuffer
+CyU3PDmaChannelDiscardBuffer
+CyU3PDmaChannelCommitBuffer
+CyU3PUsbHostPortEnable
+CyFxMscDriverDoWork
+switch_to_acc
+CyU3PMemAlloc
+_txe_thread_create
+CyU3PDeviceInit
+CyU3PDeviceCacheControl
+CyU3PDeviceConfigureIOMatrix
+_tx_initialize_kernel_enter

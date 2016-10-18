@@ -1,0 +1,797 @@
+   1              		.cpu arm926ej-s
+   2              		.fpu softvfp
+   3              		.eabi_attribute 20, 1
+   4              		.eabi_attribute 21, 1
+   5              		.eabi_attribute 23, 3
+   6              		.eabi_attribute 24, 1
+   7              		.eabi_attribute 25, 1
+   8              		.eabi_attribute 26, 1
+   9              		.eabi_attribute 30, 6
+  10              		.eabi_attribute 18, 4
+  11              		.file	"cyfxmousedrv.c"
+  19              	.Ltext0:
+  20              		.cfi_sections	.debug_frame
+  21              		.comm	glDMAEvent,40,4
+  22              		.comm	glHostAoACh,160,4
+  23              		.comm	glI2SRightCh,160,4
+  24              		.comm	glI2SLeftCh,160,4
+  25              		.comm	prodCount,4,4
+  26              		.comm	consCount,4,4
+  27              		.comm	bufCount,4,4
+  28              		.comm	lc,4,4
+  29              		.comm	rc,4,4
+  30              		.global	glHostMouseEp
+  31              		.bss
+  34              	glHostMouseEp:
+  35 0000 00       		.space	1
+  36              		.comm	glHostMouseCh,160,4
+  37              		.section	.rodata
+  38              		.align	2
+  39              	.LC0:
+  40 0000 556E6B6E 		.ascii	"Unknown mouse input.\015\012\000"
+  40      6F776E20 
+  40      6D6F7573 
+  40      6520696E 
+  40      7075742E 
+  41 0017 00       		.align	2
+  42              	.LC1:
+  43 0018 4D6F7573 		.ascii	"Mouse event: X = %d, Y = %d, scroll = %d, BMask = 0"
+  43      65206576 
+  43      656E743A 
+  43      2058203D 
+  43      2025642C 
+  44 004b 7825782E 		.ascii	"x%x.\015\012\000"
+  44      0D0A00
+  45              		.text
+  46              		.align	2
+  47              		.global	CyFxMouseDmaCb
+  49              	CyFxMouseDmaCb:
+  50              	.LFB0:
+  51              		.file 1 "../cyfxmousedrv.c"
+   1:../cyfxmousedrv.c **** /*
+   2:../cyfxmousedrv.c ****  ## Cypress USB 3.0 Platform source file (cyfxmousedrv.c)
+   3:../cyfxmousedrv.c ****  ## ===========================
+   4:../cyfxmousedrv.c ****  ##
+   5:../cyfxmousedrv.c ****  ##  Copyright Cypress Semiconductor Corporation, 2010-2011,
+   6:../cyfxmousedrv.c ****  ##  All Rights Reserved
+   7:../cyfxmousedrv.c ****  ##  UNPUBLISHED, LICENSED SOFTWARE.
+   8:../cyfxmousedrv.c ****  ##
+   9:../cyfxmousedrv.c ****  ##  CONFIDENTIAL AND PROPRIETARY INFORMATION
+  10:../cyfxmousedrv.c ****  ##  WHICH IS THE PROPERTY OF CYPRESS.
+  11:../cyfxmousedrv.c ****  ##
+  12:../cyfxmousedrv.c ****  ##  Use of this file is governed
+  13:../cyfxmousedrv.c ****  ##  by the license agreement included in the file
+  14:../cyfxmousedrv.c ****  ##
+  15:../cyfxmousedrv.c ****  ##     <install>/license/license.txt
+  16:../cyfxmousedrv.c ****  ##
+  17:../cyfxmousedrv.c ****  ##  where <install> is the Cypress software
+  18:../cyfxmousedrv.c ****  ##  installation root directory path.
+  19:../cyfxmousedrv.c ****  ##
+  20:../cyfxmousedrv.c ****  ## ===========================
+  21:../cyfxmousedrv.c **** */
+  22:../cyfxmousedrv.c **** 
+  23:../cyfxmousedrv.c **** /* This file illustrates the mouse driver. */
+  24:../cyfxmousedrv.c **** 
+  25:../cyfxmousedrv.c **** /*
+  26:../cyfxmousedrv.c ****    A simple single interface USB HID mouse will be successfully enumerated
+  27:../cyfxmousedrv.c ****    and the current offset will be printed via the UART debug logs.
+  28:../cyfxmousedrv.c **** 
+  29:../cyfxmousedrv.c ****    We support only single interface with interface class = HID(0x03),
+  30:../cyfxmousedrv.c ****    interface sub class = Boot (0x01) and interface protocol = Mouse (0x02).
+  31:../cyfxmousedrv.c ****    This example supports only 4 byte input reports with the following format:
+  32:../cyfxmousedrv.c ****         BYTE0: Bitmask for each of the button present.
+  33:../cyfxmousedrv.c ****         BYTE1: Signed movement in X direction.
+  34:../cyfxmousedrv.c ****         BYTE2: Signed movement in Y direction.
+  35:../cyfxmousedrv.c ****         BYTE3: Signed movement in scroll wheel.
+  36:../cyfxmousedrv.c ****    Further types can be implemented by decoding the HID descriptor.
+  37:../cyfxmousedrv.c **** */
+  38:../cyfxmousedrv.c **** 
+  39:../cyfxmousedrv.c **** #include "cyu3system.h"
+  40:../cyfxmousedrv.c **** #include "cyu3os.h"
+  41:../cyfxmousedrv.c **** #include "cyu3dma.h"
+  42:../cyfxmousedrv.c **** #include "cyu3error.h"
+  43:../cyfxmousedrv.c **** #include "cyu3usb.h"
+  44:../cyfxmousedrv.c **** #include "cyu3usbhost.h"
+  45:../cyfxmousedrv.c **** #include "cyu3usbotg.h"
+  46:../cyfxmousedrv.c **** #include "cyu3utils.h"
+  47:../cyfxmousedrv.c **** #include "cyfxusbhost.h"
+  48:../cyfxmousedrv.c **** 
+  49:../cyfxmousedrv.c **** uint8_t glHostMouseEp = 0;                      /* Interrupt endpoint used by the mouse application
+  50:../cyfxmousedrv.c **** 
+  51:../cyfxmousedrv.c **** CyU3PDmaChannel glHostMouseCh;                  /* DMA channel for mouse application. */
+  52:../cyfxmousedrv.c **** 
+  53:../cyfxmousedrv.c **** /* DMA callback for the mouse application. */
+  54:../cyfxmousedrv.c **** void
+  55:../cyfxmousedrv.c **** CyFxMouseDmaCb (CyU3PDmaChannel *ch,
+  56:../cyfxmousedrv.c ****         CyU3PDmaCbType_t type,
+  57:../cyfxmousedrv.c ****         CyU3PDmaCBInput_t *input)
+  58:../cyfxmousedrv.c **** {
+  52              		.loc 1 58 0
+  53              		.cfi_startproc
+  54              		@ args = 0, pretend = 0, frame = 24
+  55              		@ frame_needed = 1, uses_anonymous_args = 0
+  56 0000 00482DE9 		stmfd	sp!, {fp, lr}
+  57              	.LCFI0:
+  58              		.cfi_def_cfa_offset 8
+  59 0004 04B08DE2 		add	fp, sp, #4
+  60              		.cfi_offset 14, -4
+  61              		.cfi_offset 11, -8
+  62              	.LCFI1:
+  63              		.cfi_def_cfa 11, 4
+  64 0008 20D04DE2 		sub	sp, sp, #32
+  65 000c 10000BE5 		str	r0, [fp, #-16]
+  66 0010 0130A0E1 		mov	r3, r1
+  67 0014 18200BE5 		str	r2, [fp, #-24]
+  68 0018 B2314BE1 		strh	r3, [fp, #-18]	@ movhi
+  59:../cyfxmousedrv.c ****     uint8_t *buf = NULL;
+  69              		.loc 1 59 0
+  70 001c 0030A0E3 		mov	r3, #0
+  71 0020 08300BE5 		str	r3, [fp, #-8]
+  60:../cyfxmousedrv.c **** 
+  61:../cyfxmousedrv.c ****     if (type == CY_U3P_DMA_CB_PROD_EVENT)
+  72              		.loc 1 61 0
+  73 0024 B2315BE1 		ldrh	r3, [fp, #-18]
+  74 0028 080053E3 		cmp	r3, #8
+  75 002c 2500001A 		bne	.L1
+  62:../cyfxmousedrv.c ****     {
+  63:../cyfxmousedrv.c ****         if (input->buffer_p.count < 4)
+  76              		.loc 1 63 0
+  77 0030 18301BE5 		ldr	r3, [fp, #-24]
+  78 0034 B430D3E1 		ldrh	r3, [r3, #4]
+  79 0038 030053E3 		cmp	r3, #3
+  80 003c 0300008A 		bhi	.L3
+  64:../cyfxmousedrv.c ****         {
+  65:../cyfxmousedrv.c ****             CyU3PDebugPrint (4, "Unknown mouse input.\r\n");
+  81              		.loc 1 65 0
+  82 0040 0400A0E3 		mov	r0, #4
+  83 0044 84109FE5 		ldr	r1, .L4
+  84 0048 FEFFFFEB 		bl	CyU3PDebugPrint
+  66:../cyfxmousedrv.c ****             return;
+  85              		.loc 1 66 0
+  86 004c 1D0000EA 		b	.L1
+  87              	.L3:
+  67:../cyfxmousedrv.c ****         }
+  68:../cyfxmousedrv.c ****         /* Print the current mouse event. This example supports only
+  69:../cyfxmousedrv.c ****          * 4 byte input reports with the following format:
+  70:../cyfxmousedrv.c ****          *      BYTE0: Bitmask for each of the button present.
+  71:../cyfxmousedrv.c ****          *      BYTE1: Signed movement in X direction.
+  72:../cyfxmousedrv.c ****          *      BYTE2: Signed movement in Y direction.
+  73:../cyfxmousedrv.c ****          *      BYTE3: Signed movement in scroll wheel. */
+  74:../cyfxmousedrv.c ****         buf = input->buffer_p.buffer;
+  88              		.loc 1 74 0
+  89 0050 18301BE5 		ldr	r3, [fp, #-24]
+  90 0054 003093E5 		ldr	r3, [r3, #0]
+  91 0058 08300BE5 		str	r3, [fp, #-8]
+  75:../cyfxmousedrv.c ****         CyU3PDebugPrint (4, "Mouse event: X = %d, Y = %d, scroll = %d, BMask = 0x%x.\r\n",
+  76:../cyfxmousedrv.c ****                 (int8_t)buf[1], (int8_t)buf[2], (int8_t)buf[3], (uint8_t)buf[0]);
+  92              		.loc 1 76 0
+  93 005c 08301BE5 		ldr	r3, [fp, #-8]
+  94 0060 013083E2 		add	r3, r3, #1
+  95 0064 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+  96 0068 FF3003E2 		and	r3, r3, #255
+  75:../cyfxmousedrv.c ****         CyU3PDebugPrint (4, "Mouse event: X = %d, Y = %d, scroll = %d, BMask = 0x%x.\r\n",
+  97              		.loc 1 75 0
+  98 006c 033CA0E1 		mov	r3, r3, asl #24
+  99 0070 432CA0E1 		mov	r2, r3, asr #24
+ 100              		.loc 1 76 0
+ 101 0074 08301BE5 		ldr	r3, [fp, #-8]
+ 102 0078 023083E2 		add	r3, r3, #2
+ 103 007c 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 104 0080 FF3003E2 		and	r3, r3, #255
+  75:../cyfxmousedrv.c ****         CyU3PDebugPrint (4, "Mouse event: X = %d, Y = %d, scroll = %d, BMask = 0x%x.\r\n",
+ 105              		.loc 1 75 0
+ 106 0084 033CA0E1 		mov	r3, r3, asl #24
+ 107 0088 433CA0E1 		mov	r3, r3, asr #24
+ 108              		.loc 1 76 0
+ 109 008c 08101BE5 		ldr	r1, [fp, #-8]
+ 110 0090 031081E2 		add	r1, r1, #3
+ 111 0094 0010D1E5 		ldrb	r1, [r1, #0]	@ zero_extendqisi2
+ 112 0098 FF1001E2 		and	r1, r1, #255
+  75:../cyfxmousedrv.c ****         CyU3PDebugPrint (4, "Mouse event: X = %d, Y = %d, scroll = %d, BMask = 0x%x.\r\n",
+ 113              		.loc 1 75 0
+ 114 009c 011CA0E1 		mov	r1, r1, asl #24
+ 115 00a0 410CA0E1 		mov	r0, r1, asr #24
+ 116              		.loc 1 76 0
+ 117 00a4 08101BE5 		ldr	r1, [fp, #-8]
+ 118 00a8 0010D1E5 		ldrb	r1, [r1, #0]	@ zero_extendqisi2
+  75:../cyfxmousedrv.c ****         CyU3PDebugPrint (4, "Mouse event: X = %d, Y = %d, scroll = %d, BMask = 0x%x.\r\n",
+ 119              		.loc 1 75 0
+ 120 00ac 00008DE5 		str	r0, [sp, #0]
+ 121 00b0 04108DE5 		str	r1, [sp, #4]
+ 122 00b4 0400A0E3 		mov	r0, #4
+ 123 00b8 14109FE5 		ldr	r1, .L4+4
+ 124 00bc FEFFFFEB 		bl	CyU3PDebugPrint
+  77:../cyfxmousedrv.c **** 
+  78:../cyfxmousedrv.c ****         /* Discard the current buffer to free it. */
+  79:../cyfxmousedrv.c ****         CyU3PDmaChannelDiscardBuffer (ch);
+ 125              		.loc 1 79 0
+ 126 00c0 10001BE5 		ldr	r0, [fp, #-16]
+ 127 00c4 FEFFFFEB 		bl	CyU3PDmaChannelDiscardBuffer
+ 128              	.L1:
+  80:../cyfxmousedrv.c ****     }
+  81:../cyfxmousedrv.c **** }
+ 129              		.loc 1 81 0
+ 130 00c8 04D04BE2 		sub	sp, fp, #4
+ 131 00cc 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 132              	.L5:
+ 133              		.align	2
+ 134              	.L4:
+ 135 00d0 00000000 		.word	.LC0
+ 136 00d4 18000000 		.word	.LC1
+ 137              		.cfi_endproc
+ 138              	.LFE0:
+ 140              		.section	.rodata
+ 141 0052 0000     		.align	2
+ 142              	.LC2:
+ 143 0054 55534220 		.ascii	"USB HID Mouse driver initialized successfully.\015\012"
+ 143      48494420 
+ 143      4D6F7573 
+ 143      65206472 
+ 143      69766572 
+ 144 0084 00       		.ascii	"\000"
+ 145 0085 000000   		.text
+ 146              		.align	2
+ 147              		.global	CyFxMouseDriverInit
+ 149              	CyFxMouseDriverInit:
+ 150              	.LFB1:
+  82:../cyfxmousedrv.c **** 
+  83:../cyfxmousedrv.c **** /* Initalizes the mouse driver. */
+  84:../cyfxmousedrv.c **** CyU3PReturnStatus_t
+  85:../cyfxmousedrv.c **** CyFxMouseDriverInit ()
+  86:../cyfxmousedrv.c **** {
+ 151              		.loc 1 86 0
+ 152              		.cfi_startproc
+ 153              		@ args = 0, pretend = 0, frame = 56
+ 154              		@ frame_needed = 1, uses_anonymous_args = 0
+ 155 00d8 00482DE9 		stmfd	sp!, {fp, lr}
+ 156              	.LCFI2:
+ 157              		.cfi_def_cfa_offset 8
+ 158 00dc 04B08DE2 		add	fp, sp, #4
+ 159              		.cfi_offset 14, -4
+ 160              		.cfi_offset 11, -8
+ 161              	.LCFI3:
+ 162              		.cfi_def_cfa 11, 4
+ 163 00e0 40D04DE2 		sub	sp, sp, #64
+  87:../cyfxmousedrv.c ****     uint16_t length, size, interval;
+  88:../cyfxmousedrv.c ****     CyU3PReturnStatus_t status;
+  89:../cyfxmousedrv.c ****     CyU3PUsbHostEpConfig_t epCfg;
+  90:../cyfxmousedrv.c ****     CyU3PDmaChannelConfig_t dmaCfg;
+  91:../cyfxmousedrv.c **** 
+  92:../cyfxmousedrv.c ****     /* Read first four bytes of configuration descriptor to determine
+  93:../cyfxmousedrv.c ****      * the total length. */
+  94:../cyfxmousedrv.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 164              		.loc 1 94 0
+ 165 00e4 0430A0E3 		mov	r3, #4
+ 166 00e8 00308DE5 		str	r3, [sp, #0]
+ 167 00ec 78339FE5 		ldr	r3, .L27
+ 168 00f0 04308DE5 		str	r3, [sp, #4]
+ 169 00f4 8000A0E3 		mov	r0, #128
+ 170 00f8 0610A0E3 		mov	r1, #6
+ 171 00fc 022CA0E3 		mov	r2, #512
+ 172 0100 0030A0E3 		mov	r3, #0
+ 173 0104 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 174 0108 0C000BE5 		str	r0, [fp, #-12]
+  95:../cyfxmousedrv.c ****             (CY_U3P_USB_CONFIG_DESCR << 8), 0, 4, glEp0Buffer);
+  96:../cyfxmousedrv.c ****     if (status != CY_U3P_SUCCESS)
+ 175              		.loc 1 96 0
+ 176 010c 0C301BE5 		ldr	r3, [fp, #-12]
+ 177 0110 000053E3 		cmp	r3, #0
+ 178 0114 C700001A 		bne	.L19
+ 179              	.L7:
+  97:../cyfxmousedrv.c ****     {
+  98:../cyfxmousedrv.c ****         goto enum_error;
+  99:../cyfxmousedrv.c ****     }
+ 100:../cyfxmousedrv.c **** 
+ 101:../cyfxmousedrv.c ****     /* Identify the length of the data received. */
+ 102:../cyfxmousedrv.c ****     length = CY_U3P_MAKEWORD(glEp0Buffer[3], glEp0Buffer[2]);
+ 180              		.loc 1 102 0
+ 181 0118 4C339FE5 		ldr	r3, .L27
+ 182 011c 0330D3E5 		ldrb	r3, [r3, #3]	@ zero_extendqisi2
+ 183 0120 0334A0E1 		mov	r3, r3, asl #8
+ 184 0124 0338A0E1 		mov	r3, r3, asl #16
+ 185 0128 2328A0E1 		mov	r2, r3, lsr #16
+ 186 012c 38339FE5 		ldr	r3, .L27
+ 187 0130 0230D3E5 		ldrb	r3, [r3, #2]	@ zero_extendqisi2
+ 188 0134 033082E1 		orr	r3, r2, r3
+ 189 0138 0338A0E1 		mov	r3, r3, asl #16
+ 190 013c 2338A0E1 		mov	r3, r3, lsr #16
+ 191 0140 BE304BE1 		strh	r3, [fp, #-14]	@ movhi
+ 103:../cyfxmousedrv.c ****     if (length > CY_FX_HOST_EP0_BUFFER_SIZE)
+ 192              		.loc 1 103 0
+ 193 0144 BE305BE1 		ldrh	r3, [fp, #-14]
+ 194 0148 020C53E3 		cmp	r3, #512
+ 195 014c BB00008A 		bhi	.L20
+ 196              	.L9:
+ 104:../cyfxmousedrv.c ****     {
+ 105:../cyfxmousedrv.c ****         goto enum_error;
+ 106:../cyfxmousedrv.c ****     }
+ 107:../cyfxmousedrv.c **** 
+ 108:../cyfxmousedrv.c ****     /* Read the full configuration descriptor. */
+ 109:../cyfxmousedrv.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 197              		.loc 1 109 0
+ 198 0150 BE305BE1 		ldrh	r3, [fp, #-14]
+ 199 0154 00308DE5 		str	r3, [sp, #0]
+ 200 0158 0C339FE5 		ldr	r3, .L27
+ 201 015c 04308DE5 		str	r3, [sp, #4]
+ 202 0160 8000A0E3 		mov	r0, #128
+ 203 0164 0610A0E3 		mov	r1, #6
+ 204 0168 022CA0E3 		mov	r2, #512
+ 205 016c 0030A0E3 		mov	r3, #0
+ 206 0170 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 207 0174 0C000BE5 		str	r0, [fp, #-12]
+ 110:../cyfxmousedrv.c ****             (CY_U3P_USB_CONFIG_DESCR << 8), 0, length, glEp0Buffer);
+ 111:../cyfxmousedrv.c ****     if (status != CY_U3P_SUCCESS)
+ 208              		.loc 1 111 0
+ 209 0178 0C301BE5 		ldr	r3, [fp, #-12]
+ 210 017c 000053E3 		cmp	r3, #0
+ 211 0180 B000001A 		bne	.L21
+ 212              	.L10:
+ 112:../cyfxmousedrv.c ****     {
+ 113:../cyfxmousedrv.c ****         goto enum_error;
+ 114:../cyfxmousedrv.c ****     }
+ 115:../cyfxmousedrv.c **** 
+ 116:../cyfxmousedrv.c ****     /* Save the required information. */
+ 117:../cyfxmousedrv.c ****     glHostMouseEp = glEp0Buffer[29];
+ 213              		.loc 1 117 0
+ 214 0184 E0329FE5 		ldr	r3, .L27
+ 215 0188 1D20D3E5 		ldrb	r2, [r3, #29]	@ zero_extendqisi2
+ 216 018c DC329FE5 		ldr	r3, .L27+4
+ 217 0190 0020C3E5 		strb	r2, [r3, #0]
+ 118:../cyfxmousedrv.c ****     size = CY_U3P_MAKEWORD(glEp0Buffer[32], glEp0Buffer[31]);
+ 218              		.loc 1 118 0
+ 219 0194 D0329FE5 		ldr	r3, .L27
+ 220 0198 2030D3E5 		ldrb	r3, [r3, #32]	@ zero_extendqisi2
+ 221 019c 0334A0E1 		mov	r3, r3, asl #8
+ 222 01a0 0338A0E1 		mov	r3, r3, asl #16
+ 223 01a4 2328A0E1 		mov	r2, r3, lsr #16
+ 224 01a8 BC329FE5 		ldr	r3, .L27
+ 225 01ac 1F30D3E5 		ldrb	r3, [r3, #31]	@ zero_extendqisi2
+ 226 01b0 033082E1 		orr	r3, r2, r3
+ 227 01b4 0338A0E1 		mov	r3, r3, asl #16
+ 228 01b8 2338A0E1 		mov	r3, r3, lsr #16
+ 229 01bc B0314BE1 		strh	r3, [fp, #-16]	@ movhi
+ 119:../cyfxmousedrv.c ****     interval = glEp0Buffer[33];
+ 230              		.loc 1 119 0
+ 231 01c0 A4329FE5 		ldr	r3, .L27
+ 232 01c4 2130D3E5 		ldrb	r3, [r3, #33]	@ zero_extendqisi2
+ 233 01c8 B6304BE1 		strh	r3, [fp, #-6]	@ movhi
+ 120:../cyfxmousedrv.c **** 
+ 121:../cyfxmousedrv.c ****     /* Set the new configuration. */
+ 122:../cyfxmousedrv.c ****     status = CyFxSendSetupRqt (0x00, CY_U3P_USB_SC_SET_CONFIGURATION, 1, 0, 0, glEp0Buffer);
+ 234              		.loc 1 122 0
+ 235 01cc 0030A0E3 		mov	r3, #0
+ 236 01d0 00308DE5 		str	r3, [sp, #0]
+ 237 01d4 90329FE5 		ldr	r3, .L27
+ 238 01d8 04308DE5 		str	r3, [sp, #4]
+ 239 01dc 0000A0E3 		mov	r0, #0
+ 240 01e0 0910A0E3 		mov	r1, #9
+ 241 01e4 0120A0E3 		mov	r2, #1
+ 242 01e8 0030A0E3 		mov	r3, #0
+ 243 01ec FEFFFFEB 		bl	CyFxSendSetupRqt
+ 244 01f0 0C000BE5 		str	r0, [fp, #-12]
+ 123:../cyfxmousedrv.c ****     if (status != CY_U3P_SUCCESS)
+ 245              		.loc 1 123 0
+ 246 01f4 0C301BE5 		ldr	r3, [fp, #-12]
+ 247 01f8 000053E3 		cmp	r3, #0
+ 248 01fc 9300001A 		bne	.L22
+ 249              	.L11:
+ 124:../cyfxmousedrv.c ****     {
+ 125:../cyfxmousedrv.c ****         goto enum_error;
+ 126:../cyfxmousedrv.c ****     }
+ 127:../cyfxmousedrv.c **** 
+ 128:../cyfxmousedrv.c ****     /* Set the report mode to idle so that report is sent only
+ 129:../cyfxmousedrv.c ****      * when there is active data. */
+ 130:../cyfxmousedrv.c ****     status = CyFxSendSetupRqt (0x21, 0x0A, 0, 0, 0, glEp0Buffer);
+ 250              		.loc 1 130 0
+ 251 0200 0030A0E3 		mov	r3, #0
+ 252 0204 00308DE5 		str	r3, [sp, #0]
+ 253 0208 5C329FE5 		ldr	r3, .L27
+ 254 020c 04308DE5 		str	r3, [sp, #4]
+ 255 0210 2100A0E3 		mov	r0, #33
+ 256 0214 0A10A0E3 		mov	r1, #10
+ 257 0218 0020A0E3 		mov	r2, #0
+ 258 021c 0030A0E3 		mov	r3, #0
+ 259 0220 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 260 0224 0C000BE5 		str	r0, [fp, #-12]
+ 131:../cyfxmousedrv.c **** #if 0 /* It does not matter even if the request gets stalled. */
+ 132:../cyfxmousedrv.c ****     if (status != CY_U3P_SUCCESS)
+ 133:../cyfxmousedrv.c ****     {
+ 134:../cyfxmousedrv.c ****         goto enum_error;
+ 135:../cyfxmousedrv.c ****     }
+ 136:../cyfxmousedrv.c **** #endif
+ 137:../cyfxmousedrv.c **** 
+ 138:../cyfxmousedrv.c ****     /* Initialize the HID mouse. */
+ 139:../cyfxmousedrv.c ****     CyU3PMemSet ((uint8_t *)&epCfg, 0, sizeof(epCfg));
+ 261              		.loc 1 139 0
+ 262 0228 1C304BE2 		sub	r3, fp, #28
+ 263 022c 0300A0E1 		mov	r0, r3
+ 264 0230 0010A0E3 		mov	r1, #0
+ 265 0234 0C20A0E3 		mov	r2, #12
+ 266 0238 FEFFFFEB 		bl	CyU3PMemSet
+ 140:../cyfxmousedrv.c ****     epCfg.type = CY_U3P_USB_EP_INTR;
+ 267              		.loc 1 140 0
+ 268 023c 0330A0E3 		mov	r3, #3
+ 269 0240 1C304BE5 		strb	r3, [fp, #-28]
+ 141:../cyfxmousedrv.c ****     epCfg.mult = 1;
+ 270              		.loc 1 141 0
+ 271 0244 0130A0E3 		mov	r3, #1
+ 272 0248 1B304BE5 		strb	r3, [fp, #-27]
+ 142:../cyfxmousedrv.c ****     epCfg.maxPktSize = size;
+ 273              		.loc 1 142 0
+ 274 024c B0315BE1 		ldrh	r3, [fp, #-16]	@ movhi
+ 275 0250 BA314BE1 		strh	r3, [fp, #-26]	@ movhi
+ 143:../cyfxmousedrv.c ****     interval = (1 << (interval - 1)) / 8;
+ 276              		.loc 1 143 0
+ 277 0254 B6305BE1 		ldrh	r3, [fp, #-6]
+ 278 0258 013043E2 		sub	r3, r3, #1
+ 279 025c 0120A0E3 		mov	r2, #1
+ 280 0260 1233A0E1 		mov	r3, r2, asl r3
+ 281 0264 072083E2 		add	r2, r3, #7
+ 282 0268 000053E3 		cmp	r3, #0
+ 283 026c 0230A0B1 		movlt	r3, r2
+ 284 0270 C331A0E1 		mov	r3, r3, asr #3
+ 285 0274 B6304BE1 		strh	r3, [fp, #-6]	@ movhi
+ 144:../cyfxmousedrv.c ****     if (interval > 255)
+ 286              		.loc 1 144 0
+ 287 0278 B6305BE1 		ldrh	r3, [fp, #-6]
+ 288 027c FF0053E3 		cmp	r3, #255
+ 289 0280 0100009A 		bls	.L12
+ 145:../cyfxmousedrv.c ****     {
+ 146:../cyfxmousedrv.c ****         interval = 255;
+ 290              		.loc 1 146 0
+ 291 0284 FF30A0E3 		mov	r3, #255
+ 292 0288 B6304BE1 		strh	r3, [fp, #-6]	@ movhi
+ 293              	.L12:
+ 147:../cyfxmousedrv.c ****     }
+ 148:../cyfxmousedrv.c ****     epCfg.pollingRate = interval;
+ 294              		.loc 1 148 0
+ 295 028c B6305BE1 		ldrh	r3, [fp, #-6]	@ movhi
+ 296 0290 FF3003E2 		and	r3, r3, #255
+ 297 0294 18304BE5 		strb	r3, [fp, #-24]
+ 149:../cyfxmousedrv.c ****     /* Since DMA buffer sizes can only be multiple of 16 bytes and
+ 150:../cyfxmousedrv.c ****      * also since this is an interrupt endpoint where the max data
+ 151:../cyfxmousedrv.c ****      * packet size is same as the maxPktSize field, the fullPktSize
+ 152:../cyfxmousedrv.c ****      * has to be a multiple of 16 bytes. */
+ 153:../cyfxmousedrv.c ****     size = ((size + 0x0F) & ~0x0F);
+ 298              		.loc 1 153 0
+ 299 0298 B0315BE1 		ldrh	r3, [fp, #-16]	@ movhi
+ 300 029c 0F3083E2 		add	r3, r3, #15
+ 301 02a0 0338A0E1 		mov	r3, r3, asl #16
+ 302 02a4 2338A0E1 		mov	r3, r3, lsr #16
+ 303 02a8 0F30C3E3 		bic	r3, r3, #15
+ 304 02ac B0314BE1 		strh	r3, [fp, #-16]	@ movhi
+ 154:../cyfxmousedrv.c ****     epCfg.fullPktSize = size;
+ 305              		.loc 1 154 0
+ 306 02b0 B0315BE1 		ldrh	r3, [fp, #-16]	@ movhi
+ 307 02b4 B6314BE1 		strh	r3, [fp, #-22]	@ movhi
+ 155:../cyfxmousedrv.c ****     /* Since the IN token has to be sent out continously, it
+ 156:../cyfxmousedrv.c ****      * is easier to enable the stream mode. Otherwise we will
+ 157:../cyfxmousedrv.c ****      * have to maintain the timing. */
+ 158:../cyfxmousedrv.c ****     epCfg.isStreamMode = CyTrue;
+ 308              		.loc 1 158 0
+ 309 02b8 0130A0E3 		mov	r3, #1
+ 310 02bc 14300BE5 		str	r3, [fp, #-20]
+ 159:../cyfxmousedrv.c ****     status = CyU3PUsbHostEpAdd (glHostMouseEp, &epCfg);
+ 311              		.loc 1 159 0
+ 312 02c0 A8319FE5 		ldr	r3, .L27+4
+ 313 02c4 0020D3E5 		ldrb	r2, [r3, #0]	@ zero_extendqisi2
+ 314 02c8 1C304BE2 		sub	r3, fp, #28
+ 315 02cc 0200A0E1 		mov	r0, r2
+ 316 02d0 0310A0E1 		mov	r1, r3
+ 317 02d4 FEFFFFEB 		bl	CyU3PUsbHostEpAdd
+ 318 02d8 0C000BE5 		str	r0, [fp, #-12]
+ 160:../cyfxmousedrv.c ****     if (status != CY_U3P_SUCCESS)
+ 319              		.loc 1 160 0
+ 320 02dc 0C301BE5 		ldr	r3, [fp, #-12]
+ 321 02e0 000053E3 		cmp	r3, #0
+ 322 02e4 5B00001A 		bne	.L23
+ 323              	.L13:
+ 161:../cyfxmousedrv.c ****     {
+ 162:../cyfxmousedrv.c ****         goto enum_error;
+ 163:../cyfxmousedrv.c ****     }
+ 164:../cyfxmousedrv.c **** 
+ 165:../cyfxmousedrv.c ****     /* Create a DMA channel for this EP. */
+ 166:../cyfxmousedrv.c ****     CyU3PMemSet ((uint8_t *)&dmaCfg, 0, sizeof(dmaCfg));
+ 324              		.loc 1 166 0
+ 325 02e8 38304BE2 		sub	r3, fp, #56
+ 326 02ec 0300A0E1 		mov	r0, r3
+ 327 02f0 0010A0E3 		mov	r1, #0
+ 328 02f4 1C20A0E3 		mov	r2, #28
+ 329 02f8 FEFFFFEB 		bl	CyU3PMemSet
+ 167:../cyfxmousedrv.c ****     dmaCfg.size = size;
+ 330              		.loc 1 167 0
+ 331 02fc B0315BE1 		ldrh	r3, [fp, #-16]	@ movhi
+ 332 0300 B8334BE1 		strh	r3, [fp, #-56]	@ movhi
+ 168:../cyfxmousedrv.c ****     dmaCfg.count = CY_FX_HOST_DMA_BUF_COUNT;
+ 333              		.loc 1 168 0
+ 334 0304 0430A0E3 		mov	r3, #4
+ 335 0308 B6334BE1 		strh	r3, [fp, #-54]	@ movhi
+ 169:../cyfxmousedrv.c ****     dmaCfg.prodSckId = (CyU3PDmaSocketId_t)(CY_U3P_UIB_SOCKET_PROD_0 + (0x0F & glHostMouseEp));
+ 336              		.loc 1 169 0
+ 337 030c 5C319FE5 		ldr	r3, .L27+4
+ 338 0310 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 339 0314 0F3003E2 		and	r3, r3, #15
+ 340 0318 0338A0E1 		mov	r3, r3, asl #16
+ 341 031c 2338A0E1 		mov	r3, r3, lsr #16
+ 342 0320 013B83E2 		add	r3, r3, #1024
+ 343 0324 0338A0E1 		mov	r3, r3, asl #16
+ 344 0328 2338A0E1 		mov	r3, r3, lsr #16
+ 345 032c B4334BE1 		strh	r3, [fp, #-52]	@ movhi
+ 170:../cyfxmousedrv.c ****     dmaCfg.consSckId = CY_U3P_CPU_SOCKET_CONS;
+ 346              		.loc 1 170 0
+ 347 0330 3F3CA0E3 		mov	r3, #16128
+ 348 0334 B2334BE1 		strh	r3, [fp, #-50]	@ movhi
+ 171:../cyfxmousedrv.c ****     dmaCfg.dmaMode = CY_U3P_DMA_MODE_BYTE;
+ 349              		.loc 1 171 0
+ 350 0338 0030A0E3 		mov	r3, #0
+ 351 033c 28304BE5 		strb	r3, [fp, #-40]
+ 172:../cyfxmousedrv.c ****     dmaCfg.notification = CY_U3P_DMA_CB_PROD_EVENT;
+ 352              		.loc 1 172 0
+ 353 0340 0830A0E3 		mov	r3, #8
+ 354 0344 24300BE5 		str	r3, [fp, #-36]
+ 173:../cyfxmousedrv.c ****     dmaCfg.cb = CyFxMouseDmaCb;
+ 355              		.loc 1 173 0
+ 356 0348 24319FE5 		ldr	r3, .L27+8
+ 357 034c 20300BE5 		str	r3, [fp, #-32]
+ 174:../cyfxmousedrv.c ****     dmaCfg.prodHeader = 0;
+ 358              		.loc 1 174 0
+ 359 0350 0030A0E3 		mov	r3, #0
+ 360 0354 BE324BE1 		strh	r3, [fp, #-46]	@ movhi
+ 175:../cyfxmousedrv.c ****     dmaCfg.prodFooter = 0;
+ 361              		.loc 1 175 0
+ 362 0358 0030A0E3 		mov	r3, #0
+ 363 035c BC324BE1 		strh	r3, [fp, #-44]	@ movhi
+ 176:../cyfxmousedrv.c ****     dmaCfg.consHeader = 0;
+ 364              		.loc 1 176 0
+ 365 0360 0030A0E3 		mov	r3, #0
+ 366 0364 BA324BE1 		strh	r3, [fp, #-42]	@ movhi
+ 177:../cyfxmousedrv.c ****     dmaCfg.prodAvailCount = 0;
+ 367              		.loc 1 177 0
+ 368 0368 0030A0E3 		mov	r3, #0
+ 369 036c B0334BE1 		strh	r3, [fp, #-48]	@ movhi
+ 178:../cyfxmousedrv.c ****     status = CyU3PDmaChannelCreate (&glHostMouseCh, CY_U3P_DMA_TYPE_MANUAL_IN, &dmaCfg);
+ 370              		.loc 1 178 0
+ 371 0370 38304BE2 		sub	r3, fp, #56
+ 372 0374 FC009FE5 		ldr	r0, .L27+12
+ 373 0378 0310A0E3 		mov	r1, #3
+ 374 037c 0320A0E1 		mov	r2, r3
+ 375 0380 FEFFFFEB 		bl	CyU3PDmaChannelCreate
+ 376 0384 0C000BE5 		str	r0, [fp, #-12]
+ 179:../cyfxmousedrv.c ****     if (status != CY_U3P_SUCCESS)
+ 377              		.loc 1 179 0
+ 378 0388 0C301BE5 		ldr	r3, [fp, #-12]
+ 379 038c 000053E3 		cmp	r3, #0
+ 380 0390 1500001A 		bne	.L24
+ 381              	.L14:
+ 180:../cyfxmousedrv.c ****     {
+ 181:../cyfxmousedrv.c ****         goto app_error;
+ 182:../cyfxmousedrv.c ****     }
+ 183:../cyfxmousedrv.c **** 
+ 184:../cyfxmousedrv.c ****     /* Enable EP transfer. In stream mode, the transfer size should be zero. */
+ 185:../cyfxmousedrv.c ****     status = CyU3PUsbHostEpSetXfer (glHostMouseEp, CY_U3P_USB_HOST_EPXFER_NORMAL, 0);
+ 382              		.loc 1 185 0
+ 383 0394 D4309FE5 		ldr	r3, .L27+4
+ 384 0398 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 385 039c 0300A0E1 		mov	r0, r3
+ 386 03a0 0010A0E3 		mov	r1, #0
+ 387 03a4 0020A0E3 		mov	r2, #0
+ 388 03a8 FEFFFFEB 		bl	CyU3PUsbHostEpSetXfer
+ 389 03ac 0C000BE5 		str	r0, [fp, #-12]
+ 186:../cyfxmousedrv.c ****     if (status != CY_U3P_SUCCESS)
+ 390              		.loc 1 186 0
+ 391 03b0 0C301BE5 		ldr	r3, [fp, #-12]
+ 392 03b4 000053E3 		cmp	r3, #0
+ 393 03b8 0D00001A 		bne	.L25
+ 394              	.L16:
+ 187:../cyfxmousedrv.c ****     {
+ 188:../cyfxmousedrv.c ****         goto app_error;
+ 189:../cyfxmousedrv.c ****     }
+ 190:../cyfxmousedrv.c **** 
+ 191:../cyfxmousedrv.c ****     /* Set for infinite transfer. */
+ 192:../cyfxmousedrv.c ****     status = CyU3PDmaChannelSetXfer (&glHostMouseCh, 0);
+ 395              		.loc 1 192 0
+ 396 03bc B4009FE5 		ldr	r0, .L27+12
+ 397 03c0 0010A0E3 		mov	r1, #0
+ 398 03c4 FEFFFFEB 		bl	CyU3PDmaChannelSetXfer
+ 399 03c8 0C000BE5 		str	r0, [fp, #-12]
+ 193:../cyfxmousedrv.c ****     if (status != CY_U3P_SUCCESS)
+ 400              		.loc 1 193 0
+ 401 03cc 0C301BE5 		ldr	r3, [fp, #-12]
+ 402 03d0 000053E3 		cmp	r3, #0
+ 403 03d4 0800001A 		bne	.L26
+ 404              	.L17:
+ 194:../cyfxmousedrv.c ****     {
+ 195:../cyfxmousedrv.c ****         goto app_error;
+ 196:../cyfxmousedrv.c ****     }
+ 197:../cyfxmousedrv.c **** 
+ 198:../cyfxmousedrv.c ****     CyU3PDebugPrint (4, "USB HID Mouse driver initialized successfully.\r\n");
+ 405              		.loc 1 198 0
+ 406 03d8 0400A0E3 		mov	r0, #4
+ 407 03dc 98109FE5 		ldr	r1, .L27+16
+ 408 03e0 FEFFFFEB 		bl	CyU3PDebugPrint
+ 199:../cyfxmousedrv.c ****     return CY_U3P_SUCCESS;
+ 409              		.loc 1 199 0
+ 410 03e4 0030A0E3 		mov	r3, #0
+ 411 03e8 1C0000EA 		b	.L18
+ 412              	.L24:
+ 181:../cyfxmousedrv.c ****         goto app_error;
+ 413              		.loc 1 181 0
+ 414 03ec 0000A0E1 		mov	r0, r0	@ nop
+ 415 03f0 020000EA 		b	.L15
+ 416              	.L25:
+ 188:../cyfxmousedrv.c ****         goto app_error;
+ 417              		.loc 1 188 0
+ 418 03f4 0000A0E1 		mov	r0, r0	@ nop
+ 419 03f8 000000EA 		b	.L15
+ 420              	.L26:
+ 195:../cyfxmousedrv.c ****         goto app_error;
+ 421              		.loc 1 195 0
+ 422 03fc 0000A0E1 		mov	r0, r0	@ nop
+ 423              	.L15:
+ 200:../cyfxmousedrv.c **** 
+ 201:../cyfxmousedrv.c **** app_error:
+ 202:../cyfxmousedrv.c ****     CyU3PDmaChannelDestroy (&glHostMouseCh);
+ 424              		.loc 1 202 0
+ 425 0400 70009FE5 		ldr	r0, .L27+12
+ 426 0404 FEFFFFEB 		bl	CyU3PDmaChannelDestroy
+ 203:../cyfxmousedrv.c ****     if (glHostMouseEp != 0)
+ 427              		.loc 1 203 0
+ 428 0408 60309FE5 		ldr	r3, .L27+4
+ 429 040c 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 430 0410 000053E3 		cmp	r3, #0
+ 431 0414 1000000A 		beq	.L8
+ 204:../cyfxmousedrv.c ****     {
+ 205:../cyfxmousedrv.c ****         CyU3PUsbHostEpRemove (glHostMouseEp);
+ 432              		.loc 1 205 0
+ 433 0418 50309FE5 		ldr	r3, .L27+4
+ 434 041c 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 435 0420 0300A0E1 		mov	r0, r3
+ 436 0424 FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 206:../cyfxmousedrv.c ****         glHostMouseEp = 0;
+ 437              		.loc 1 206 0
+ 438 0428 40309FE5 		ldr	r3, .L27+4
+ 439 042c 0020A0E3 		mov	r2, #0
+ 440 0430 0020C3E5 		strb	r2, [r3, #0]
+ 441 0434 080000EA 		b	.L8
+ 442              	.L19:
+  98:../cyfxmousedrv.c ****         goto enum_error;
+ 443              		.loc 1 98 0
+ 444 0438 0000A0E1 		mov	r0, r0	@ nop
+ 445 043c 060000EA 		b	.L8
+ 446              	.L20:
+ 105:../cyfxmousedrv.c ****         goto enum_error;
+ 447              		.loc 1 105 0
+ 448 0440 0000A0E1 		mov	r0, r0	@ nop
+ 449 0444 040000EA 		b	.L8
+ 450              	.L21:
+ 113:../cyfxmousedrv.c ****         goto enum_error;
+ 451              		.loc 1 113 0
+ 452 0448 0000A0E1 		mov	r0, r0	@ nop
+ 453 044c 020000EA 		b	.L8
+ 454              	.L22:
+ 125:../cyfxmousedrv.c ****         goto enum_error;
+ 455              		.loc 1 125 0
+ 456 0450 0000A0E1 		mov	r0, r0	@ nop
+ 457 0454 000000EA 		b	.L8
+ 458              	.L23:
+ 162:../cyfxmousedrv.c ****         goto enum_error;
+ 459              		.loc 1 162 0
+ 460 0458 0000A0E1 		mov	r0, r0	@ nop
+ 461              	.L8:
+ 207:../cyfxmousedrv.c ****     }
+ 208:../cyfxmousedrv.c **** 
+ 209:../cyfxmousedrv.c **** enum_error:
+ 210:../cyfxmousedrv.c ****     return CY_U3P_ERROR_FAILURE;
+ 462              		.loc 1 210 0
+ 463 045c 4A30A0E3 		mov	r3, #74
+ 464              	.L18:
+ 211:../cyfxmousedrv.c **** }
+ 465              		.loc 1 211 0
+ 466 0460 0300A0E1 		mov	r0, r3
+ 467 0464 04D04BE2 		sub	sp, fp, #4
+ 468 0468 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 469              	.L28:
+ 470              		.align	2
+ 471              	.L27:
+ 472 046c 00000000 		.word	glEp0Buffer
+ 473 0470 00000000 		.word	glHostMouseEp
+ 474 0474 00000000 		.word	CyFxMouseDmaCb
+ 475 0478 00000000 		.word	glHostMouseCh
+ 476 047c 54000000 		.word	.LC2
+ 477              		.cfi_endproc
+ 478              	.LFE1:
+ 480              		.align	2
+ 481              		.global	CyFxMouseDriverDeInit
+ 483              	CyFxMouseDriverDeInit:
+ 484              	.LFB2:
+ 212:../cyfxmousedrv.c **** 
+ 213:../cyfxmousedrv.c **** /* Disables the mouse driver. */
+ 214:../cyfxmousedrv.c **** void
+ 215:../cyfxmousedrv.c **** CyFxMouseDriverDeInit ()
+ 216:../cyfxmousedrv.c **** {
+ 485              		.loc 1 216 0
+ 486              		.cfi_startproc
+ 487              		@ args = 0, pretend = 0, frame = 0
+ 488              		@ frame_needed = 1, uses_anonymous_args = 0
+ 489 0480 00482DE9 		stmfd	sp!, {fp, lr}
+ 490              	.LCFI4:
+ 491              		.cfi_def_cfa_offset 8
+ 492 0484 04B08DE2 		add	fp, sp, #4
+ 493              		.cfi_offset 14, -4
+ 494              		.cfi_offset 11, -8
+ 495              	.LCFI5:
+ 496              		.cfi_def_cfa 11, 4
+ 217:../cyfxmousedrv.c ****     /* Destroy the DMA channel. */
+ 218:../cyfxmousedrv.c ****     CyU3PDmaChannelDestroy (&glHostMouseCh);
+ 497              		.loc 1 218 0
+ 498 0488 30009FE5 		ldr	r0, .L31
+ 499 048c FEFFFFEB 		bl	CyU3PDmaChannelDestroy
+ 219:../cyfxmousedrv.c ****     if (glHostMouseEp != 0)
+ 500              		.loc 1 219 0
+ 501 0490 2C309FE5 		ldr	r3, .L31+4
+ 502 0494 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 503 0498 000053E3 		cmp	r3, #0
+ 504 049c 0600000A 		beq	.L29
+ 220:../cyfxmousedrv.c ****     {
+ 221:../cyfxmousedrv.c ****         CyU3PUsbHostEpRemove (glHostMouseEp);
+ 505              		.loc 1 221 0
+ 506 04a0 1C309FE5 		ldr	r3, .L31+4
+ 507 04a4 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 508 04a8 0300A0E1 		mov	r0, r3
+ 509 04ac FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 222:../cyfxmousedrv.c ****         glHostMouseEp = 0;
+ 510              		.loc 1 222 0
+ 511 04b0 0C309FE5 		ldr	r3, .L31+4
+ 512 04b4 0020A0E3 		mov	r2, #0
+ 513 04b8 0020C3E5 		strb	r2, [r3, #0]
+ 514              	.L29:
+ 223:../cyfxmousedrv.c ****     }
+ 224:../cyfxmousedrv.c **** }
+ 515              		.loc 1 224 0
+ 516 04bc 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 517              	.L32:
+ 518              		.align	2
+ 519              	.L31:
+ 520 04c0 00000000 		.word	glHostMouseCh
+ 521 04c4 00000000 		.word	glHostMouseEp
+ 522              		.cfi_endproc
+ 523              	.LFE2:
+ 525              	.Letext0:
+DEFINED SYMBOLS
+                            *ABS*:00000000 cyfxmousedrv.c
+                            *COM*:00000028 glDMAEvent
+                            *COM*:000000a0 glHostAoACh
+                            *COM*:000000a0 glI2SRightCh
+                            *COM*:000000a0 glI2SLeftCh
+                            *COM*:00000004 prodCount
+                            *COM*:00000004 consCount
+                            *COM*:00000004 bufCount
+                            *COM*:00000004 lc
+                            *COM*:00000004 rc
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:34     .bss:00000000 glHostMouseEp
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:35     .bss:00000000 $d
+                            *COM*:000000a0 glHostMouseCh
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:38     .rodata:00000000 $d
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:46     .text:00000000 $a
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:49     .text:00000000 CyFxMouseDmaCb
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:135    .text:000000d0 $d
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:146    .text:000000d8 $a
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:149    .text:000000d8 CyFxMouseDriverInit
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:472    .text:0000046c $d
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:480    .text:00000480 $a
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:483    .text:00000480 CyFxMouseDriverDeInit
+C:\Users\kumr\AppData\Local\Temp\ccndIsFB.s:520    .text:000004c0 $d
+                     .debug_frame:00000010 $d
+
+UNDEFINED SYMBOLS
+CyU3PDebugPrint
+CyU3PDmaChannelDiscardBuffer
+CyFxSendSetupRqt
+CyU3PMemSet
+CyU3PUsbHostEpAdd
+CyU3PDmaChannelCreate
+CyU3PUsbHostEpSetXfer
+CyU3PDmaChannelSetXfer
+CyU3PDmaChannelDestroy
+CyU3PUsbHostEpRemove
+glEp0Buffer

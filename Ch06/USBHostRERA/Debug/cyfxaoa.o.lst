@@ -1,0 +1,1348 @@
+   1              		.cpu arm926ej-s
+   2              		.fpu softvfp
+   3              		.eabi_attribute 20, 1
+   4              		.eabi_attribute 21, 1
+   5              		.eabi_attribute 23, 3
+   6              		.eabi_attribute 24, 1
+   7              		.eabi_attribute 25, 1
+   8              		.eabi_attribute 26, 1
+   9              		.eabi_attribute 30, 6
+  10              		.eabi_attribute 18, 4
+  11              		.file	"cyfxaoa.c"
+  19              	.Ltext0:
+  20              		.cfi_sections	.debug_frame
+  21              		.comm	glDMAEvent,40,4
+  22              		.comm	glHostAoACh,160,4
+  23              		.comm	glI2SRightCh,160,4
+  24              		.comm	glI2SLeftCh,160,4
+  25              		.comm	prodCount,4,4
+  26              		.comm	consCount,4,4
+  27              		.comm	bufCount,4,4
+  28              		.comm	lc,4,4
+  29              		.comm	rc,4,4
+  30              		.align	2
+  31              		.global	CyFxAoADmaCb
+  33              	CyFxAoADmaCb:
+  34              	.LFB0:
+  35              		.file 1 "../cyfxaoa.c"
+   1:../cyfxaoa.c  **** /*
+   2:../cyfxaoa.c  ****  ## Cypress USB 3.0 Platform source file (cyfxmousedrv.c)
+   3:../cyfxaoa.c  ****  ## ===========================
+   4:../cyfxaoa.c  ****  ##
+   5:../cyfxaoa.c  ****  ##  Copyright Cypress Semiconductor Corporation, 2010-2011,
+   6:../cyfxaoa.c  ****  ##  All Rights Reserved
+   7:../cyfxaoa.c  ****  ##  UNPUBLISHED, LICENSED SOFTWARE.
+   8:../cyfxaoa.c  ****  ##
+   9:../cyfxaoa.c  ****  ##  CONFIDENTIAL AND PROPRIETARY INFORMATION
+  10:../cyfxaoa.c  ****  ##  WHICH IS THE PROPERTY OF CYPRESS.
+  11:../cyfxaoa.c  ****  ##
+  12:../cyfxaoa.c  ****  ##  Use of this file is governed
+  13:../cyfxaoa.c  ****  ##  by the license agreement included in the file
+  14:../cyfxaoa.c  ****  ##
+  15:../cyfxaoa.c  ****  ##     <install>/license/license.txt
+  16:../cyfxaoa.c  ****  ##
+  17:../cyfxaoa.c  ****  ##  where <install> is the Cypress software
+  18:../cyfxaoa.c  ****  ##  installation root directory path.
+  19:../cyfxaoa.c  ****  ##
+  20:../cyfxaoa.c  ****  ## ===========================
+  21:../cyfxaoa.c  **** */
+  22:../cyfxaoa.c  **** 
+  23:../cyfxaoa.c  **** /* This file illustrates the mouse driver. */
+  24:../cyfxaoa.c  **** 
+  25:../cyfxaoa.c  **** /*
+  26:../cyfxaoa.c  ****    A simple single interface USB HID mouse will be successfully enumerated
+  27:../cyfxaoa.c  ****    and the current offset will be printed via the UART debug logs.
+  28:../cyfxaoa.c  **** 
+  29:../cyfxaoa.c  ****    We support only single interface with interface class = HID(0x03),
+  30:../cyfxaoa.c  ****    interface sub class = Boot (0x01) and interface protocol = Mouse (0x02).
+  31:../cyfxaoa.c  ****    This example supports only 4 byte input reports with the following format:
+  32:../cyfxaoa.c  ****         BYTE0: Bitmask for each of the button present.
+  33:../cyfxaoa.c  ****         BYTE1: Signed movement in X direction.
+  34:../cyfxaoa.c  ****         BYTE2: Signed movement in Y direction.
+  35:../cyfxaoa.c  ****         BYTE3: Signed movement in scroll wheel.
+  36:../cyfxaoa.c  ****    Further types can be implemented by decoding the HID descriptor.
+  37:../cyfxaoa.c  **** */
+  38:../cyfxaoa.c  **** 
+  39:../cyfxaoa.c  **** #include "cyu3system.h"
+  40:../cyfxaoa.c  **** #include "cyu3os.h"
+  41:../cyfxaoa.c  **** #include "cyu3dma.h"
+  42:../cyfxaoa.c  **** #include "cyu3error.h"
+  43:../cyfxaoa.c  **** #include "cyu3usb.h"
+  44:../cyfxaoa.c  **** #include "cyu3usbhost.h"
+  45:../cyfxaoa.c  **** #include "cyu3usbotg.h"
+  46:../cyfxaoa.c  **** #include "cyu3utils.h"
+  47:../cyfxaoa.c  **** #include "cyfxusbhost.h"
+  48:../cyfxaoa.c  **** 
+  49:../cyfxaoa.c  **** 
+  50:../cyfxaoa.c  **** void switch_to_acc();
+  51:../cyfxaoa.c  **** 
+  52:../cyfxaoa.c  **** #define USB_SETUP_HOST_TO_DEVICE                0x00    // Device Request bmRequestType transfer di
+  53:../cyfxaoa.c  **** #define USB_SETUP_DEVICE_TO_HOST                0x80    // Device Request bmRequestType transfer di
+  54:../cyfxaoa.c  **** #define USB_SETUP_TYPE_STANDARD                 0x00    // Device Request bmRequestType type - stan
+  55:../cyfxaoa.c  **** #define USB_SETUP_TYPE_CLASS                    0x20    // Device Request bmRequestType type - clas
+  56:../cyfxaoa.c  **** #define USB_SETUP_TYPE_VENDOR                   0x40    // Device Request bmRequestType type - vend
+  57:../cyfxaoa.c  **** #define USB_SETUP_RECIPIENT_DEVICE              0x00    // Device Request bmRequestType recipient -
+  58:../cyfxaoa.c  **** #define USB_SETUP_RECIPIENT_INTERFACE           0x01    // Device Request bmRequestType recipient -
+  59:../cyfxaoa.c  **** #define USB_SETUP_RECIPIENT_ENDPOINT            0x02    // Device Request bmRequestType recipient -
+  60:../cyfxaoa.c  **** #define USB_SETUP_RECIPIENT_OTHER               0x03    // Device Request bmRequestType recipient -
+  61:../cyfxaoa.c  **** 
+  62:../cyfxaoa.c  **** 
+  63:../cyfxaoa.c  **** #define ACCESSORY_STRING_MANUFACTURER   0
+  64:../cyfxaoa.c  **** #define ACCESSORY_STRING_MODEL          1
+  65:../cyfxaoa.c  **** #define ACCESSORY_STRING_DESCRIPTION    2
+  66:../cyfxaoa.c  **** #define ACCESSORY_STRING_VERSION        3
+  67:../cyfxaoa.c  **** #define ACCESSORY_STRING_URI            4
+  68:../cyfxaoa.c  **** #define ACCESSORY_STRING_SERIAL         5
+  69:../cyfxaoa.c  **** 
+  70:../cyfxaoa.c  **** #define ACCESSORY_GET_PROTOCOL          51
+  71:../cyfxaoa.c  **** #define ACCESSORY_SEND_STRING           52
+  72:../cyfxaoa.c  **** #define ACCESSORY_START                 53
+  73:../cyfxaoa.c  **** 
+  74:../cyfxaoa.c  **** //extern uint8_t glEp0Buffer[];
+  75:../cyfxaoa.c  **** 
+  76:../cyfxaoa.c  **** /* DMA callback for the mouse application. */
+  77:../cyfxaoa.c  **** void
+  78:../cyfxaoa.c  **** CyFxAoADmaCb (CyU3PDmaChannel *ch,
+  79:../cyfxaoa.c  ****         CyU3PDmaCbType_t type,
+  80:../cyfxaoa.c  ****         CyU3PDmaCBInput_t *input)
+  81:../cyfxaoa.c  **** {
+  36              		.loc 1 81 0
+  37              		.cfi_startproc
+  38              		@ args = 0, pretend = 0, frame = 24
+  39              		@ frame_needed = 1, uses_anonymous_args = 0
+  40 0000 00482DE9 		stmfd	sp!, {fp, lr}
+  41              	.LCFI0:
+  42              		.cfi_def_cfa_offset 8
+  43 0004 04B08DE2 		add	fp, sp, #4
+  44              		.cfi_offset 14, -4
+  45              		.cfi_offset 11, -8
+  46              	.LCFI1:
+  47              		.cfi_def_cfa 11, 4
+  48 0008 18D04DE2 		sub	sp, sp, #24
+  49 000c 10000BE5 		str	r0, [fp, #-16]
+  50 0010 0130A0E1 		mov	r3, r1
+  51 0014 18200BE5 		str	r2, [fp, #-24]
+  52 0018 B2314BE1 		strh	r3, [fp, #-18]	@ movhi
+  82:../cyfxaoa.c  **** 	uint16_t i;
+  83:../cyfxaoa.c  **** 	uint16_t count = input->buffer_p.count;
+  53              		.loc 1 83 0
+  54 001c 18301BE5 		ldr	r3, [fp, #-24]
+  55 0020 B430D3E1 		ldrh	r3, [r3, #4]	@ movhi
+  56 0024 B6304BE1 		strh	r3, [fp, #-6]	@ movhi
+  84:../cyfxaoa.c  **** 	uint8_t * buf = input->buffer_p.buffer;
+  57              		.loc 1 84 0
+  58 0028 18301BE5 		ldr	r3, [fp, #-24]
+  59 002c 003093E5 		ldr	r3, [r3, #0]
+  60 0030 0C300BE5 		str	r3, [fp, #-12]
+  85:../cyfxaoa.c  **** 
+  86:../cyfxaoa.c  ****     if (type == CY_U3P_DMA_CB_PROD_EVENT)
+  61              		.loc 1 86 0
+  62 0034 B2315BE1 		ldrh	r3, [fp, #-18]
+  63 0038 080053E3 		cmp	r3, #8
+  64 003c 0900001A 		bne	.L2
+  87:../cyfxaoa.c  ****     {
+  88:../cyfxaoa.c  **** //    	CyU3PDmaChannelDiscardBuffer(ch);
+  89:../cyfxaoa.c  **** //    	CyU3PDebugPrint(2, "Got data\n");
+  90:../cyfxaoa.c  **** //    	return;
+  91:../cyfxaoa.c  **** 
+  92:../cyfxaoa.c  **** //    	gotData = CyTrue;
+  93:../cyfxaoa.c  **** 
+  94:../cyfxaoa.c  ****         prodCount++;
+  65              		.loc 1 94 0
+  66 0040 48309FE5 		ldr	r3, .L4
+  67 0044 003093E5 		ldr	r3, [r3, #0]
+  68 0048 012083E2 		add	r2, r3, #1
+  69 004c 3C309FE5 		ldr	r3, .L4
+  70 0050 002083E5 		str	r2, [r3, #0]
+  95:../cyfxaoa.c  ****         CyU3PEventSet(&glDMAEvent, PROD_EVENT, CYU3P_EVENT_OR);
+  71              		.loc 1 95 0
+  72 0054 38009FE5 		ldr	r0, .L4+4
+  73 0058 0110A0E3 		mov	r1, #1
+  74 005c 0020A0E3 		mov	r2, #0
+  75 0060 FEFFFFEB 		bl	_txe_event_flags_set
+  76 0064 070000EA 		b	.L1
+  77              	.L2:
+  96:../cyfxaoa.c  ****     } else if (type == CY_U3P_DMA_CB_CONS_EVENT) {
+  78              		.loc 1 96 0
+  79 0068 B2315BE1 		ldrh	r3, [fp, #-18]
+  80 006c 100053E3 		cmp	r3, #16
+  81 0070 0400001A 		bne	.L1
+  97:../cyfxaoa.c  ****     	consCount++;
+  82              		.loc 1 97 0
+  83 0074 1C309FE5 		ldr	r3, .L4+8
+  84 0078 003093E5 		ldr	r3, [r3, #0]
+  85 007c 012083E2 		add	r2, r3, #1
+  86 0080 10309FE5 		ldr	r3, .L4+8
+  87 0084 002083E5 		str	r2, [r3, #0]
+  88              	.L1:
+  98:../cyfxaoa.c  ****     }
+  99:../cyfxaoa.c  **** }
+  89              		.loc 1 99 0
+  90 0088 04D04BE2 		sub	sp, fp, #4
+  91 008c 0088BDE8 		ldmfd	sp!, {fp, pc}
+  92              	.L5:
+  93              		.align	2
+  94              	.L4:
+  95 0090 00000000 		.word	prodCount
+  96 0094 00000000 		.word	glDMAEvent
+  97 0098 00000000 		.word	consCount
+  98              		.cfi_endproc
+  99              	.LFE0:
+ 101              		.section	.rodata
+ 102              		.align	2
+ 103              	.LC0:
+ 104 0000 496E2043 		.ascii	"In CyFxAOADriverInit start\015\012\000"
+ 104      79467841 
+ 104      4F414472 
+ 104      69766572 
+ 104      496E6974 
+ 105 001d 000000   		.align	2
+ 106              	.LC1:
+ 107 0020 53657420 		.ascii	"Set Config success\015\012\000"
+ 107      436F6E66 
+ 107      69672073 
+ 107      75636365 
+ 107      73730D0A 
+ 108 0035 000000   		.align	2
+ 109              	.LC2:
+ 110 0038 53657420 		.ascii	"Set interface success\015\012\000"
+ 110      696E7465 
+ 110      72666163 
+ 110      65207375 
+ 110      63636573 
+ 111              		.align	2
+ 112              	.LC3:
+ 113 0050 53657420 		.ascii	"Set CUR failed\015\012\000"
+ 113      43555220 
+ 113      6661696C 
+ 113      65640D0A 
+ 113      00
+ 114 0061 000000   		.align	2
+ 115              	.LC4:
+ 116 0064 53657420 		.ascii	"Set CUR success\015\012\000"
+ 116      43555220 
+ 116      73756363 
+ 116      6573730D 
+ 116      0A00
+ 117 0076 0000     		.align	2
+ 118              	.LC5:
+ 119 0078 47657420 		.ascii	"Get CUR failed\015\012\000"
+ 119      43555220 
+ 119      6661696C 
+ 119      65640D0A 
+ 119      00
+ 120 0089 000000   		.align	2
+ 121              	.LC6:
+ 122 008c 47657420 		.ascii	"Get CUR success\015\012\000"
+ 122      43555220 
+ 122      73756363 
+ 122      6573730D 
+ 122      0A00
+ 123 009e 0000     		.align	2
+ 124              	.LC7:
+ 125 00a0 45502043 		.ascii	"EP Config success\015\012\000"
+ 125      6F6E6669 
+ 125      67207375 
+ 125      63636573 
+ 125      730D0A00 
+ 126              		.align	2
+ 127              	.LC8:
+ 128 00b4 444D4120 		.ascii	"DMA Config success\015\012\000"
+ 128      436F6E66 
+ 128      69672073 
+ 128      75636365 
+ 128      73730D0A 
+ 129 00c9 000000   		.align	2
+ 130              	.LC9:
+ 131 00cc 6C656674 		.ascii	"left out success\015\012\000"
+ 131      206F7574 
+ 131      20737563 
+ 131      63657373 
+ 131      0D0A00
+ 132 00df 00       		.align	2
+ 133              	.LC10:
+ 134 00e0 72696768 		.ascii	"right out failed 0x%x\015\012\000"
+ 134      74206F75 
+ 134      74206661 
+ 134      696C6564 
+ 134      20307825 
+ 135              		.align	2
+ 136              	.LC11:
+ 137 00f8 72696768 		.ascii	"right out success\015\012\000"
+ 137      74206F75 
+ 137      74207375 
+ 137      63636573 
+ 137      730D0A00 
+ 138              		.align	2
+ 139              	.LC12:
+ 140 010c 686F7374 		.ascii	"hostepsetxfer success\015\012\000"
+ 140      65707365 
+ 140      74786665 
+ 140      72207375 
+ 140      63636573 
+ 141              		.align	2
+ 142              	.LC13:
+ 143 0124 696E2064 		.ascii	"in dma setxfer success\015\012\000"
+ 143      6D612073 
+ 143      65747866 
+ 143      65722073 
+ 143      75636365 
+ 144 013d 000000   		.align	2
+ 145              	.LC14:
+ 146 0140 496E2043 		.ascii	"In CyFxAOADriverInit end\015\012\000"
+ 146      79467841 
+ 146      4F414472 
+ 146      69766572 
+ 146      496E6974 
+ 147              		.text
+ 148              		.align	2
+ 149              		.global	CyFxAOADriverInit
+ 151              	CyFxAOADriverInit:
+ 152              	.LFB1:
+ 100:../cyfxaoa.c  **** 
+ 101:../cyfxaoa.c  **** /* Initalizes the mouse driver. */
+ 102:../cyfxaoa.c  **** CyU3PReturnStatus_t
+ 103:../cyfxaoa.c  **** CyFxAOADriverInit ()
+ 104:../cyfxaoa.c  **** {
+ 153              		.loc 1 104 0
+ 154              		.cfi_startproc
+ 155              		@ args = 0, pretend = 0, frame = 48
+ 156              		@ frame_needed = 1, uses_anonymous_args = 0
+ 157 009c 00482DE9 		stmfd	sp!, {fp, lr}
+ 158              	.LCFI2:
+ 159              		.cfi_def_cfa_offset 8
+ 160 00a0 04B08DE2 		add	fp, sp, #4
+ 161              		.cfi_offset 14, -4
+ 162              		.cfi_offset 11, -8
+ 163              	.LCFI3:
+ 164              		.cfi_def_cfa 11, 4
+ 165 00a4 38D04DE2 		sub	sp, sp, #56
+ 105:../cyfxaoa.c  ****     uint16_t length, size, interval;
+ 106:../cyfxaoa.c  ****     CyU3PReturnStatus_t status;
+ 107:../cyfxaoa.c  ****     CyU3PUsbHostEpConfig_t epCfg;
+ 108:../cyfxaoa.c  ****     CyU3PDmaChannelConfig_t dmaCfg;
+ 109:../cyfxaoa.c  **** 
+ 110:../cyfxaoa.c  ****     CyU3PDebugPrint (4, "In CyFxAOADriverInit start\r\n");
+ 166              		.loc 1 110 0
+ 167 00a8 0400A0E3 		mov	r0, #4
+ 168 00ac 08149FE5 		ldr	r1, .L33
+ 169 00b0 FEFFFFEB 		bl	CyU3PDebugPrint
+ 111:../cyfxaoa.c  **** 
+ 112:../cyfxaoa.c  **** #if 0
+ 113:../cyfxaoa.c  ****    /*  Read first four bytes of configuration descriptor to determine
+ 114:../cyfxaoa.c  ****       the total length.*/
+ 115:../cyfxaoa.c  ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 116:../cyfxaoa.c  ****             (CY_U3P_USB_CONFIG_DESCR << 8), 0, 4, glEp0Buffer);
+ 117:../cyfxaoa.c  ****     if (status != CY_U3P_SUCCESS)
+ 118:../cyfxaoa.c  ****     {
+ 119:../cyfxaoa.c  ****         goto enum_error;
+ 120:../cyfxaoa.c  ****     }
+ 121:../cyfxaoa.c  **** 
+ 122:../cyfxaoa.c  ****     /* Identify the length of the data received.*/
+ 123:../cyfxaoa.c  ****     length = CY_U3P_MAKEWORD(glEp0Buffer[3], glEp0Buffer[2]);
+ 124:../cyfxaoa.c  ****     if (length > CY_FX_HOST_EP0_BUFFER_SIZE)
+ 125:../cyfxaoa.c  ****     {
+ 126:../cyfxaoa.c  ****         goto enum_error;
+ 127:../cyfxaoa.c  ****     }
+ 128:../cyfxaoa.c  **** 
+ 129:../cyfxaoa.c  ****     /* Read the full configuration descriptor.*/
+ 130:../cyfxaoa.c  ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 131:../cyfxaoa.c  ****             (CY_U3P_USB_CONFIG_DESCR << 8), 0, length, glEp0Buffer);
+ 132:../cyfxaoa.c  ****     if (status != CY_U3P_SUCCESS)
+ 133:../cyfxaoa.c  ****     {
+ 134:../cyfxaoa.c  ****         goto enum_error;
+ 135:../cyfxaoa.c  ****     }
+ 136:../cyfxaoa.c  **** #endif
+ 137:../cyfxaoa.c  ****     /* Set the new configuration. */
+ 138:../cyfxaoa.c  ****        status = CyFxSendSetupRqt (0x00, CY_U3P_USB_SC_SET_CONFIGURATION, 1, 0, 0, glEp0Buffer);
+ 170              		.loc 1 138 0
+ 171 00b4 0030A0E3 		mov	r3, #0
+ 172 00b8 00308DE5 		str	r3, [sp, #0]
+ 173 00bc FC339FE5 		ldr	r3, .L33+4
+ 174 00c0 04308DE5 		str	r3, [sp, #4]
+ 175 00c4 0000A0E3 		mov	r0, #0
+ 176 00c8 0910A0E3 		mov	r1, #9
+ 177 00cc 0120A0E3 		mov	r2, #1
+ 178 00d0 0030A0E3 		mov	r3, #0
+ 179 00d4 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 180 00d8 08000BE5 		str	r0, [fp, #-8]
+ 139:../cyfxaoa.c  ****        if (status != CY_U3P_SUCCESS)
+ 181              		.loc 1 139 0
+ 182 00dc 08301BE5 		ldr	r3, [fp, #-8]
+ 183 00e0 000053E3 		cmp	r3, #0
+ 184 00e4 EB00001A 		bne	.L24
+ 185              	.L7:
+ 140:../cyfxaoa.c  ****        {
+ 141:../cyfxaoa.c  ****            goto enum_error;
+ 142:../cyfxaoa.c  ****        }
+ 143:../cyfxaoa.c  ****        CyU3PDebugPrint (4, "Set Config success\r\n");
+ 186              		.loc 1 143 0
+ 187 00e8 0400A0E3 		mov	r0, #4
+ 188 00ec D0139FE5 		ldr	r1, .L33+8
+ 189 00f0 FEFFFFEB 		bl	CyU3PDebugPrint
+ 144:../cyfxaoa.c  **** 
+ 145:../cyfxaoa.c  **** //		/* Set the interface. */
+ 146:../cyfxaoa.c  **** //		status = CyFxSendSetupRqt (0x01, CY_U3P_USB_SC_SET_INTERFACE, 0, 2, 0, glEp0Buffer);
+ 147:../cyfxaoa.c  **** //		if (status != CY_U3P_SUCCESS)
+ 148:../cyfxaoa.c  **** //		{
+ 149:../cyfxaoa.c  **** //			goto enum_error;
+ 150:../cyfxaoa.c  **** //		}
+ 151:../cyfxaoa.c  **** //		CyU3PDebugPrint (4, "Set interface success\r\n");
+ 152:../cyfxaoa.c  **** 
+ 153:../cyfxaoa.c  **** 		/* Set the interface. */
+ 154:../cyfxaoa.c  **** 		status = CyFxSendSetupRqt (0x01, CY_U3P_USB_SC_SET_INTERFACE, 1, 2, 0, glEp0Buffer);
+ 190              		.loc 1 154 0
+ 191 00f4 0030A0E3 		mov	r3, #0
+ 192 00f8 00308DE5 		str	r3, [sp, #0]
+ 193 00fc BC339FE5 		ldr	r3, .L33+4
+ 194 0100 04308DE5 		str	r3, [sp, #4]
+ 195 0104 0100A0E3 		mov	r0, #1
+ 196 0108 0B10A0E3 		mov	r1, #11
+ 197 010c 0120A0E3 		mov	r2, #1
+ 198 0110 0230A0E3 		mov	r3, #2
+ 199 0114 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 200 0118 08000BE5 		str	r0, [fp, #-8]
+ 155:../cyfxaoa.c  **** 		if (status != CY_U3P_SUCCESS)
+ 201              		.loc 1 155 0
+ 202 011c 08301BE5 		ldr	r3, [fp, #-8]
+ 203 0120 000053E3 		cmp	r3, #0
+ 204 0124 DD00001A 		bne	.L25
+ 205              	.L9:
+ 156:../cyfxaoa.c  **** 		{
+ 157:../cyfxaoa.c  **** 			goto enum_error;
+ 158:../cyfxaoa.c  **** 		}
+ 159:../cyfxaoa.c  **** 		CyU3PDebugPrint (4, "Set interface success\r\n");
+ 206              		.loc 1 159 0
+ 207 0128 0400A0E3 		mov	r0, #4
+ 208 012c 94139FE5 		ldr	r1, .L33+12
+ 209 0130 FEFFFFEB 		bl	CyU3PDebugPrint
+ 160:../cyfxaoa.c  **** 
+ 161:../cyfxaoa.c  **** 	    CyU3PThreadSleep (5);
+ 210              		.loc 1 161 0
+ 211 0134 0500A0E3 		mov	r0, #5
+ 212 0138 FEFFFFEB 		bl	_tx_thread_sleep
+ 162:../cyfxaoa.c  **** 
+ 163:../cyfxaoa.c  **** 		glEp0Buffer[0] = 0x44;
+ 213              		.loc 1 163 0
+ 214 013c 7C339FE5 		ldr	r3, .L33+4
+ 215 0140 4420A0E3 		mov	r2, #68
+ 216 0144 0020C3E5 		strb	r2, [r3, #0]
+ 164:../cyfxaoa.c  **** 		glEp0Buffer[1] = 0xAC;
+ 217              		.loc 1 164 0
+ 218 0148 70339FE5 		ldr	r3, .L33+4
+ 219 014c 5320E0E3 		mvn	r2, #83
+ 220 0150 0120C3E5 		strb	r2, [r3, #1]
+ 165:../cyfxaoa.c  **** 		glEp0Buffer[2] = 0;
+ 221              		.loc 1 165 0
+ 222 0154 64339FE5 		ldr	r3, .L33+4
+ 223 0158 0020A0E3 		mov	r2, #0
+ 224 015c 0220C3E5 		strb	r2, [r3, #2]
+ 166:../cyfxaoa.c  **** 		/* Set the set_cur. */
+ 167:../cyfxaoa.c  **** 		status = CyFxSendSetupRqt (0x22, 1, 0x0100, 0x83, 3, glEp0Buffer);
+ 225              		.loc 1 167 0
+ 226 0160 0330A0E3 		mov	r3, #3
+ 227 0164 00308DE5 		str	r3, [sp, #0]
+ 228 0168 50339FE5 		ldr	r3, .L33+4
+ 229 016c 04308DE5 		str	r3, [sp, #4]
+ 230 0170 2200A0E3 		mov	r0, #34
+ 231 0174 0110A0E3 		mov	r1, #1
+ 232 0178 012CA0E3 		mov	r2, #256
+ 233 017c 8330A0E3 		mov	r3, #131
+ 234 0180 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 235 0184 08000BE5 		str	r0, [fp, #-8]
+ 168:../cyfxaoa.c  **** 		if (status != CY_U3P_SUCCESS)
+ 236              		.loc 1 168 0
+ 237 0188 08301BE5 		ldr	r3, [fp, #-8]
+ 238 018c 000053E3 		cmp	r3, #0
+ 239 0190 0300000A 		beq	.L10
+ 169:../cyfxaoa.c  **** 		{
+ 170:../cyfxaoa.c  **** 			CyU3PDebugPrint (4, "Set CUR failed\r\n");
+ 240              		.loc 1 170 0
+ 241 0194 0400A0E3 		mov	r0, #4
+ 242 0198 2C139FE5 		ldr	r1, .L33+16
+ 243 019c FEFFFFEB 		bl	CyU3PDebugPrint
+ 244 01a0 020000EA 		b	.L11
+ 245              	.L10:
+ 171:../cyfxaoa.c  **** 			//goto enum_error;
+ 172:../cyfxaoa.c  **** 		}
+ 173:../cyfxaoa.c  **** 		else
+ 174:../cyfxaoa.c  **** 			CyU3PDebugPrint (4, "Set CUR success\r\n");
+ 246              		.loc 1 174 0
+ 247 01a4 0400A0E3 		mov	r0, #4
+ 248 01a8 20139FE5 		ldr	r1, .L33+20
+ 249 01ac FEFFFFEB 		bl	CyU3PDebugPrint
+ 250              	.L11:
+ 175:../cyfxaoa.c  **** 
+ 176:../cyfxaoa.c  **** 		/* Set the get_cur. */
+ 177:../cyfxaoa.c  **** 		status = CyFxSendSetupRqt (0xA2, 0x81, 0x0100, 0x83, 3, glEp0Buffer);
+ 251              		.loc 1 177 0
+ 252 01b0 0330A0E3 		mov	r3, #3
+ 253 01b4 00308DE5 		str	r3, [sp, #0]
+ 254 01b8 00339FE5 		ldr	r3, .L33+4
+ 255 01bc 04308DE5 		str	r3, [sp, #4]
+ 256 01c0 A200A0E3 		mov	r0, #162
+ 257 01c4 8110A0E3 		mov	r1, #129
+ 258 01c8 012CA0E3 		mov	r2, #256
+ 259 01cc 8330A0E3 		mov	r3, #131
+ 260 01d0 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 261 01d4 08000BE5 		str	r0, [fp, #-8]
+ 178:../cyfxaoa.c  **** 		if (status != CY_U3P_SUCCESS)
+ 262              		.loc 1 178 0
+ 263 01d8 08301BE5 		ldr	r3, [fp, #-8]
+ 264 01dc 000053E3 		cmp	r3, #0
+ 265 01e0 0300000A 		beq	.L12
+ 179:../cyfxaoa.c  **** 		{
+ 180:../cyfxaoa.c  **** 			CyU3PDebugPrint (4, "Get CUR failed\r\n");
+ 266              		.loc 1 180 0
+ 267 01e4 0400A0E3 		mov	r0, #4
+ 268 01e8 E4129FE5 		ldr	r1, .L33+24
+ 269 01ec FEFFFFEB 		bl	CyU3PDebugPrint
+ 270 01f0 020000EA 		b	.L13
+ 271              	.L12:
+ 181:../cyfxaoa.c  **** 			//goto enum_error;
+ 182:../cyfxaoa.c  **** 		}
+ 183:../cyfxaoa.c  **** 		else
+ 184:../cyfxaoa.c  **** 			CyU3PDebugPrint (4, "Get CUR success\r\n");
+ 272              		.loc 1 184 0
+ 273 01f4 0400A0E3 		mov	r0, #4
+ 274 01f8 D8129FE5 		ldr	r1, .L33+28
+ 275 01fc FEFFFFEB 		bl	CyU3PDebugPrint
+ 276              	.L13:
+ 185:../cyfxaoa.c  **** 
+ 186:../cyfxaoa.c  **** 
+ 187:../cyfxaoa.c  ****        /* Add the IN endpoint. */
+ 188:../cyfxaoa.c  ****        CyU3PMemSet ((uint8_t *)&epCfg, 0, sizeof(epCfg));
+ 277              		.loc 1 188 0
+ 278 0200 18304BE2 		sub	r3, fp, #24
+ 279 0204 0300A0E1 		mov	r0, r3
+ 280 0208 0010A0E3 		mov	r1, #0
+ 281 020c 0C20A0E3 		mov	r2, #12
+ 282 0210 FEFFFFEB 		bl	CyU3PMemSet
+ 189:../cyfxaoa.c  ****        epCfg.type = CY_U3P_USB_EP_ISO;
+ 283              		.loc 1 189 0
+ 284 0214 0130A0E3 		mov	r3, #1
+ 285 0218 18304BE5 		strb	r3, [fp, #-24]
+ 190:../cyfxaoa.c  ****        epCfg.mult = 1;
+ 286              		.loc 1 190 0
+ 287 021c 0130A0E3 		mov	r3, #1
+ 288 0220 17304BE5 		strb	r3, [fp, #-23]
+ 191:../cyfxaoa.c  ****        epCfg.maxPktSize = 256;
+ 289              		.loc 1 191 0
+ 290 0224 013CA0E3 		mov	r3, #256
+ 291 0228 B6314BE1 		strh	r3, [fp, #-22]	@ movhi
+ 192:../cyfxaoa.c  ****        epCfg.pollingRate = 1;
+ 292              		.loc 1 192 0
+ 293 022c 0130A0E3 		mov	r3, #1
+ 294 0230 14304BE5 		strb	r3, [fp, #-20]
+ 193:../cyfxaoa.c  ****        /* Since DMA buffer sizes can only be multiple of 16 bytes and
+ 194:../cyfxaoa.c  ****         * also since this is an interrupt endpoint where the max data
+ 195:../cyfxaoa.c  ****         * packet size is same as the maxPktSize field, the fullPktSize
+ 196:../cyfxaoa.c  ****         * has to be a multiple of 16 bytes. */
+ 197:../cyfxaoa.c  ****        size = ((256 + 0x0F) & ~0x0F);
+ 295              		.loc 1 197 0
+ 296 0234 013CA0E3 		mov	r3, #256
+ 297 0238 BA304BE1 		strh	r3, [fp, #-10]	@ movhi
+ 198:../cyfxaoa.c  ****        epCfg.fullPktSize = size;
+ 298              		.loc 1 198 0
+ 299 023c BA305BE1 		ldrh	r3, [fp, #-10]	@ movhi
+ 300 0240 B2314BE1 		strh	r3, [fp, #-18]	@ movhi
+ 199:../cyfxaoa.c  ****        epCfg.isStreamMode = CyTrue;
+ 301              		.loc 1 199 0
+ 302 0244 0130A0E3 		mov	r3, #1
+ 303 0248 10300BE5 		str	r3, [fp, #-16]
+ 200:../cyfxaoa.c  ****        status = CyU3PUsbHostEpAdd (0x83, &epCfg);
+ 304              		.loc 1 200 0
+ 305 024c 18304BE2 		sub	r3, fp, #24
+ 306 0250 8300A0E3 		mov	r0, #131
+ 307 0254 0310A0E1 		mov	r1, r3
+ 308 0258 FEFFFFEB 		bl	CyU3PUsbHostEpAdd
+ 309 025c 08000BE5 		str	r0, [fp, #-8]
+ 201:../cyfxaoa.c  ****        if (status != CY_U3P_SUCCESS)
+ 310              		.loc 1 201 0
+ 311 0260 08301BE5 		ldr	r3, [fp, #-8]
+ 312 0264 000053E3 		cmp	r3, #0
+ 313 0268 8E00001A 		bne	.L26
+ 314              	.L14:
+ 202:../cyfxaoa.c  ****        {
+ 203:../cyfxaoa.c  ****            goto enum_error;
+ 204:../cyfxaoa.c  ****        }
+ 205:../cyfxaoa.c  ****        CyU3PDebugPrint (4, "EP Config success\r\n");
+ 315              		.loc 1 205 0
+ 316 026c 0400A0E3 		mov	r0, #4
+ 317 0270 64129FE5 		ldr	r1, .L33+32
+ 318 0274 FEFFFFEB 		bl	CyU3PDebugPrint
+ 206:../cyfxaoa.c  **** 
+ 207:../cyfxaoa.c  ****        /* Create a DMA channel for this EP. */
+ 208:../cyfxaoa.c  ****        CyU3PMemSet ((uint8_t *)&dmaCfg, 0, sizeof(dmaCfg));
+ 319              		.loc 1 208 0
+ 320 0278 34304BE2 		sub	r3, fp, #52
+ 321 027c 0300A0E1 		mov	r0, r3
+ 322 0280 0010A0E3 		mov	r1, #0
+ 323 0284 1C20A0E3 		mov	r2, #28
+ 324 0288 FEFFFFEB 		bl	CyU3PMemSet
+ 209:../cyfxaoa.c  ****        dmaCfg.size = size;
+ 325              		.loc 1 209 0
+ 326 028c BA305BE1 		ldrh	r3, [fp, #-10]	@ movhi
+ 327 0290 B4334BE1 		strh	r3, [fp, #-52]	@ movhi
+ 210:../cyfxaoa.c  ****        dmaCfg.count = 6;
+ 328              		.loc 1 210 0
+ 329 0294 0630A0E3 		mov	r3, #6
+ 330 0298 B2334BE1 		strh	r3, [fp, #-50]	@ movhi
+ 211:../cyfxaoa.c  ****        dmaCfg.prodSckId = (CyU3PDmaSocketId_t)(CY_U3P_UIB_SOCKET_PROD_0 + (0x0F & 0x83));
+ 331              		.loc 1 211 0
+ 332 029c 3C329FE5 		ldr	r3, .L33+36
+ 333 02a0 B0334BE1 		strh	r3, [fp, #-48]	@ movhi
+ 212:../cyfxaoa.c  ****        dmaCfg.consSckId = CY_U3P_CPU_SOCKET_CONS;
+ 334              		.loc 1 212 0
+ 335 02a4 3F3CA0E3 		mov	r3, #16128
+ 336 02a8 BE324BE1 		strh	r3, [fp, #-46]	@ movhi
+ 213:../cyfxaoa.c  ****        dmaCfg.dmaMode = CY_U3P_DMA_MODE_BYTE;
+ 337              		.loc 1 213 0
+ 338 02ac 0030A0E3 		mov	r3, #0
+ 339 02b0 24304BE5 		strb	r3, [fp, #-36]
+ 214:../cyfxaoa.c  ****        dmaCfg.notification = CY_U3P_DMA_CB_PROD_EVENT;
+ 340              		.loc 1 214 0
+ 341 02b4 0830A0E3 		mov	r3, #8
+ 342 02b8 20300BE5 		str	r3, [fp, #-32]
+ 215:../cyfxaoa.c  ****        dmaCfg.cb = CyFxAoADmaCb;
+ 343              		.loc 1 215 0
+ 344 02bc 20329FE5 		ldr	r3, .L33+40
+ 345 02c0 1C300BE5 		str	r3, [fp, #-28]
+ 216:../cyfxaoa.c  ****        dmaCfg.prodHeader = 0;
+ 346              		.loc 1 216 0
+ 347 02c4 0030A0E3 		mov	r3, #0
+ 348 02c8 BA324BE1 		strh	r3, [fp, #-42]	@ movhi
+ 217:../cyfxaoa.c  ****        dmaCfg.prodFooter = 0;
+ 349              		.loc 1 217 0
+ 350 02cc 0030A0E3 		mov	r3, #0
+ 351 02d0 B8324BE1 		strh	r3, [fp, #-40]	@ movhi
+ 218:../cyfxaoa.c  ****        dmaCfg.consHeader = 0;
+ 352              		.loc 1 218 0
+ 353 02d4 0030A0E3 		mov	r3, #0
+ 354 02d8 B6324BE1 		strh	r3, [fp, #-38]	@ movhi
+ 219:../cyfxaoa.c  ****        dmaCfg.prodAvailCount = 0;
+ 355              		.loc 1 219 0
+ 356 02dc 0030A0E3 		mov	r3, #0
+ 357 02e0 BC324BE1 		strh	r3, [fp, #-44]	@ movhi
+ 220:../cyfxaoa.c  ****        status = CyU3PDmaChannelCreate (&glHostAoACh, CY_U3P_DMA_TYPE_MANUAL_IN, &dmaCfg);
+ 358              		.loc 1 220 0
+ 359 02e4 34304BE2 		sub	r3, fp, #52
+ 360 02e8 F8019FE5 		ldr	r0, .L33+44
+ 361 02ec 0310A0E3 		mov	r1, #3
+ 362 02f0 0320A0E1 		mov	r2, r3
+ 363 02f4 FEFFFFEB 		bl	CyU3PDmaChannelCreate
+ 364 02f8 08000BE5 		str	r0, [fp, #-8]
+ 221:../cyfxaoa.c  ****        if (status != CY_U3P_SUCCESS)
+ 365              		.loc 1 221 0
+ 366 02fc 08301BE5 		ldr	r3, [fp, #-8]
+ 367 0300 000053E3 		cmp	r3, #0
+ 368 0304 5300001A 		bne	.L27
+ 369              	.L15:
+ 222:../cyfxaoa.c  ****        {
+ 223:../cyfxaoa.c  ****            goto app_error;
+ 224:../cyfxaoa.c  ****        }
+ 225:../cyfxaoa.c  **** 
+ 226:../cyfxaoa.c  ****        dmaCfg.prodSckId = CY_U3P_CPU_SOCKET_PROD;
+ 370              		.loc 1 226 0
+ 371 0308 DC319FE5 		ldr	r3, .L33+48
+ 372 030c B0334BE1 		strh	r3, [fp, #-48]	@ movhi
+ 227:../cyfxaoa.c  ****        dmaCfg.consSckId = CY_U3P_LPP_SOCKET_I2S_LEFT;
+ 373              		.loc 1 227 0
+ 374 0310 0030A0E3 		mov	r3, #0
+ 375 0314 BE324BE1 		strh	r3, [fp, #-46]	@ movhi
+ 228:../cyfxaoa.c  ****        dmaCfg.notification = 0;
+ 376              		.loc 1 228 0
+ 377 0318 0030A0E3 		mov	r3, #0
+ 378 031c 20300BE5 		str	r3, [fp, #-32]
+ 229:../cyfxaoa.c  ****        dmaCfg.cb = NULL;
+ 379              		.loc 1 229 0
+ 380 0320 0030A0E3 		mov	r3, #0
+ 381 0324 1C300BE5 		str	r3, [fp, #-28]
+ 230:../cyfxaoa.c  ****        status = CyU3PDmaChannelCreate (&glI2SLeftCh, CY_U3P_DMA_TYPE_MANUAL_OUT, &dmaCfg);
+ 382              		.loc 1 230 0
+ 383 0328 34304BE2 		sub	r3, fp, #52
+ 384 032c BC019FE5 		ldr	r0, .L33+52
+ 385 0330 0410A0E3 		mov	r1, #4
+ 386 0334 0320A0E1 		mov	r2, r3
+ 387 0338 FEFFFFEB 		bl	CyU3PDmaChannelCreate
+ 388 033c 08000BE5 		str	r0, [fp, #-8]
+ 231:../cyfxaoa.c  ****        if (status != CY_U3P_SUCCESS)
+ 389              		.loc 1 231 0
+ 390 0340 08301BE5 		ldr	r3, [fp, #-8]
+ 391 0344 000053E3 		cmp	r3, #0
+ 392 0348 4400001A 		bne	.L28
+ 393              	.L17:
+ 232:../cyfxaoa.c  ****        {
+ 233:../cyfxaoa.c  ****            goto app_error;
+ 234:../cyfxaoa.c  ****        }
+ 235:../cyfxaoa.c  **** 
+ 236:../cyfxaoa.c  ****        dmaCfg.prodSckId = CY_U3P_CPU_SOCKET_PROD;
+ 394              		.loc 1 236 0
+ 395 034c 98319FE5 		ldr	r3, .L33+48
+ 396 0350 B0334BE1 		strh	r3, [fp, #-48]	@ movhi
+ 237:../cyfxaoa.c  ****        dmaCfg.consSckId = CY_U3P_LPP_SOCKET_I2S_RIGHT;
+ 397              		.loc 1 237 0
+ 398 0354 0130A0E3 		mov	r3, #1
+ 399 0358 BE324BE1 		strh	r3, [fp, #-46]	@ movhi
+ 238:../cyfxaoa.c  ****        status = CyU3PDmaChannelCreate (&glI2SRightCh, CY_U3P_DMA_TYPE_MANUAL_OUT, &dmaCfg);
+ 400              		.loc 1 238 0
+ 401 035c 34304BE2 		sub	r3, fp, #52
+ 402 0360 8C019FE5 		ldr	r0, .L33+56
+ 403 0364 0410A0E3 		mov	r1, #4
+ 404 0368 0320A0E1 		mov	r2, r3
+ 405 036c FEFFFFEB 		bl	CyU3PDmaChannelCreate
+ 406 0370 08000BE5 		str	r0, [fp, #-8]
+ 239:../cyfxaoa.c  ****        if (status != CY_U3P_SUCCESS)
+ 407              		.loc 1 239 0
+ 408 0374 08301BE5 		ldr	r3, [fp, #-8]
+ 409 0378 000053E3 		cmp	r3, #0
+ 410 037c 3900001A 		bne	.L29
+ 411              	.L18:
+ 240:../cyfxaoa.c  ****        {
+ 241:../cyfxaoa.c  ****            goto app_error;
+ 242:../cyfxaoa.c  ****        }
+ 243:../cyfxaoa.c  **** 
+ 244:../cyfxaoa.c  ****        CyU3PDebugPrint (4, "DMA Config success\r\n");
+ 412              		.loc 1 244 0
+ 413 0380 0400A0E3 		mov	r0, #4
+ 414 0384 6C119FE5 		ldr	r1, .L33+60
+ 415 0388 FEFFFFEB 		bl	CyU3PDebugPrint
+ 245:../cyfxaoa.c  **** 
+ 246:../cyfxaoa.c  ****        status = CyU3PDmaChannelSetXfer (&glI2SLeftCh, 0);
+ 416              		.loc 1 246 0
+ 417 038c 5C019FE5 		ldr	r0, .L33+52
+ 418 0390 0010A0E3 		mov	r1, #0
+ 419 0394 FEFFFFEB 		bl	CyU3PDmaChannelSetXfer
+ 420 0398 08000BE5 		str	r0, [fp, #-8]
+ 247:../cyfxaoa.c  ****        if (status != CY_U3P_SUCCESS)
+ 421              		.loc 1 247 0
+ 422 039c 08301BE5 		ldr	r3, [fp, #-8]
+ 423 03a0 000053E3 		cmp	r3, #0
+ 424 03a4 3100001A 		bne	.L30
+ 425              	.L19:
+ 248:../cyfxaoa.c  ****        {
+ 249:../cyfxaoa.c  ****            goto app_error;
+ 250:../cyfxaoa.c  ****        }
+ 251:../cyfxaoa.c  ****        CyU3PDebugPrint (4, "left out success\r\n");
+ 426              		.loc 1 251 0
+ 427 03a8 0400A0E3 		mov	r0, #4
+ 428 03ac 48119FE5 		ldr	r1, .L33+64
+ 429 03b0 FEFFFFEB 		bl	CyU3PDebugPrint
+ 252:../cyfxaoa.c  **** 
+ 253:../cyfxaoa.c  ****        status = CyU3PDmaChannelSetXfer (&glI2SRightCh, 0);
+ 430              		.loc 1 253 0
+ 431 03b4 38019FE5 		ldr	r0, .L33+56
+ 432 03b8 0010A0E3 		mov	r1, #0
+ 433 03bc FEFFFFEB 		bl	CyU3PDmaChannelSetXfer
+ 434 03c0 08000BE5 		str	r0, [fp, #-8]
+ 254:../cyfxaoa.c  ****        if (status != CY_U3P_SUCCESS)
+ 435              		.loc 1 254 0
+ 436 03c4 08301BE5 		ldr	r3, [fp, #-8]
+ 437 03c8 000053E3 		cmp	r3, #0
+ 438 03cc 0400000A 		beq	.L20
+ 255:../cyfxaoa.c  ****        {
+ 256:../cyfxaoa.c  ****     	   CyU3PDebugPrint (4, "right out failed 0x%x\r\n", status);
+ 439              		.loc 1 256 0
+ 440 03d0 0400A0E3 		mov	r0, #4
+ 441 03d4 24119FE5 		ldr	r1, .L33+68
+ 442 03d8 08201BE5 		ldr	r2, [fp, #-8]
+ 443 03dc FEFFFFEB 		bl	CyU3PDebugPrint
+ 257:../cyfxaoa.c  ****            goto app_error;
+ 444              		.loc 1 257 0
+ 445 03e0 270000EA 		b	.L16
+ 446              	.L20:
+ 258:../cyfxaoa.c  ****        }
+ 259:../cyfxaoa.c  ****        CyU3PDebugPrint (4, "right out success\r\n");
+ 447              		.loc 1 259 0
+ 448 03e4 0400A0E3 		mov	r0, #4
+ 449 03e8 14119FE5 		ldr	r1, .L33+72
+ 450 03ec FEFFFFEB 		bl	CyU3PDebugPrint
+ 260:../cyfxaoa.c  **** 
+ 261:../cyfxaoa.c  ****        /* Enable EP transfer. In stream mode, the transfer size should be zero. */
+ 262:../cyfxaoa.c  **** 	   status = CyU3PUsbHostEpSetXfer (0x83, CY_U3P_USB_HOST_EPXFER_NORMAL, 0);
+ 451              		.loc 1 262 0
+ 452 03f0 8300A0E3 		mov	r0, #131
+ 453 03f4 0010A0E3 		mov	r1, #0
+ 454 03f8 0020A0E3 		mov	r2, #0
+ 455 03fc FEFFFFEB 		bl	CyU3PUsbHostEpSetXfer
+ 456 0400 08000BE5 		str	r0, [fp, #-8]
+ 263:../cyfxaoa.c  **** 	   if (status != CY_U3P_SUCCESS)
+ 457              		.loc 1 263 0
+ 458 0404 08301BE5 		ldr	r3, [fp, #-8]
+ 459 0408 000053E3 		cmp	r3, #0
+ 460 040c 1900001A 		bne	.L31
+ 461              	.L21:
+ 264:../cyfxaoa.c  **** 	   {
+ 265:../cyfxaoa.c  **** 	 	  goto app_error;
+ 266:../cyfxaoa.c  **** 	   }
+ 267:../cyfxaoa.c  **** 	   CyU3PDebugPrint (4, "hostepsetxfer success\r\n");
+ 462              		.loc 1 267 0
+ 463 0410 0400A0E3 		mov	r0, #4
+ 464 0414 EC109FE5 		ldr	r1, .L33+76
+ 465 0418 FEFFFFEB 		bl	CyU3PDebugPrint
+ 268:../cyfxaoa.c  **** 
+ 269:../cyfxaoa.c  ****        /* Set for infinite transfer. */
+ 270:../cyfxaoa.c  ****        status = CyU3PDmaChannelSetXfer (&glHostAoACh, 0);
+ 466              		.loc 1 270 0
+ 467 041c C4009FE5 		ldr	r0, .L33+44
+ 468 0420 0010A0E3 		mov	r1, #0
+ 469 0424 FEFFFFEB 		bl	CyU3PDmaChannelSetXfer
+ 470 0428 08000BE5 		str	r0, [fp, #-8]
+ 271:../cyfxaoa.c  ****        if (status != CY_U3P_SUCCESS)
+ 471              		.loc 1 271 0
+ 472 042c 08301BE5 		ldr	r3, [fp, #-8]
+ 473 0430 000053E3 		cmp	r3, #0
+ 474 0434 1100001A 		bne	.L32
+ 475              	.L22:
+ 272:../cyfxaoa.c  ****        {
+ 273:../cyfxaoa.c  ****            goto app_error;
+ 274:../cyfxaoa.c  ****        }
+ 275:../cyfxaoa.c  ****        CyU3PDebugPrint (4, "in dma setxfer success\r\n");
+ 476              		.loc 1 275 0
+ 477 0438 0400A0E3 		mov	r0, #4
+ 478 043c C8109FE5 		ldr	r1, .L33+80
+ 479 0440 FEFFFFEB 		bl	CyU3PDebugPrint
+ 276:../cyfxaoa.c  **** 
+ 277:../cyfxaoa.c  ****        CyU3PDebugPrint (4, "In CyFxAOADriverInit end\r\n");
+ 480              		.loc 1 277 0
+ 481 0444 0400A0E3 		mov	r0, #4
+ 482 0448 C0109FE5 		ldr	r1, .L33+84
+ 483 044c FEFFFFEB 		bl	CyU3PDebugPrint
+ 278:../cyfxaoa.c  **** 
+ 279:../cyfxaoa.c  **** 
+ 280:../cyfxaoa.c  ****        return CY_U3P_SUCCESS;
+ 484              		.loc 1 280 0
+ 485 0450 0030A0E3 		mov	r3, #0
+ 486 0454 150000EA 		b	.L23
+ 487              	.L27:
+ 223:../cyfxaoa.c  ****            goto app_error;
+ 488              		.loc 1 223 0
+ 489 0458 0000A0E1 		mov	r0, r0	@ nop
+ 490 045c 080000EA 		b	.L16
+ 491              	.L28:
+ 233:../cyfxaoa.c  ****            goto app_error;
+ 492              		.loc 1 233 0
+ 493 0460 0000A0E1 		mov	r0, r0	@ nop
+ 494 0464 060000EA 		b	.L16
+ 495              	.L29:
+ 241:../cyfxaoa.c  ****            goto app_error;
+ 496              		.loc 1 241 0
+ 497 0468 0000A0E1 		mov	r0, r0	@ nop
+ 498 046c 040000EA 		b	.L16
+ 499              	.L30:
+ 249:../cyfxaoa.c  ****            goto app_error;
+ 500              		.loc 1 249 0
+ 501 0470 0000A0E1 		mov	r0, r0	@ nop
+ 502 0474 020000EA 		b	.L16
+ 503              	.L31:
+ 265:../cyfxaoa.c  **** 	 	  goto app_error;
+ 504              		.loc 1 265 0
+ 505 0478 0000A0E1 		mov	r0, r0	@ nop
+ 506 047c 000000EA 		b	.L16
+ 507              	.L32:
+ 273:../cyfxaoa.c  ****            goto app_error;
+ 508              		.loc 1 273 0
+ 509 0480 0000A0E1 		mov	r0, r0	@ nop
+ 510              	.L16:
+ 281:../cyfxaoa.c  **** 
+ 282:../cyfxaoa.c  **** app_error:
+ 283:../cyfxaoa.c  ****    CyU3PDmaChannelDestroy (&glHostAoACh);
+ 511              		.loc 1 283 0
+ 512 0484 5C009FE5 		ldr	r0, .L33+44
+ 513 0488 FEFFFFEB 		bl	CyU3PDmaChannelDestroy
+ 284:../cyfxaoa.c  ****    CyU3PUsbHostEpRemove (0x83);
+ 514              		.loc 1 284 0
+ 515 048c 8300A0E3 		mov	r0, #131
+ 516 0490 FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 517 0494 040000EA 		b	.L8
+ 518              	.L24:
+ 141:../cyfxaoa.c  ****            goto enum_error;
+ 519              		.loc 1 141 0
+ 520 0498 0000A0E1 		mov	r0, r0	@ nop
+ 521 049c 020000EA 		b	.L8
+ 522              	.L25:
+ 157:../cyfxaoa.c  **** 			goto enum_error;
+ 523              		.loc 1 157 0
+ 524 04a0 0000A0E1 		mov	r0, r0	@ nop
+ 525 04a4 000000EA 		b	.L8
+ 526              	.L26:
+ 203:../cyfxaoa.c  ****            goto enum_error;
+ 527              		.loc 1 203 0
+ 528 04a8 0000A0E1 		mov	r0, r0	@ nop
+ 529              	.L8:
+ 285:../cyfxaoa.c  **** 
+ 286:../cyfxaoa.c  **** enum_error:
+ 287:../cyfxaoa.c  ****     return CY_U3P_ERROR_FAILURE;
+ 530              		.loc 1 287 0
+ 531 04ac 4A30A0E3 		mov	r3, #74
+ 532              	.L23:
+ 288:../cyfxaoa.c  **** }
+ 533              		.loc 1 288 0
+ 534 04b0 0300A0E1 		mov	r0, r3
+ 535 04b4 04D04BE2 		sub	sp, fp, #4
+ 536 04b8 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 537              	.L34:
+ 538              		.align	2
+ 539              	.L33:
+ 540 04bc 00000000 		.word	.LC0
+ 541 04c0 00000000 		.word	glEp0Buffer
+ 542 04c4 20000000 		.word	.LC1
+ 543 04c8 38000000 		.word	.LC2
+ 544 04cc 50000000 		.word	.LC3
+ 545 04d0 64000000 		.word	.LC4
+ 546 04d4 78000000 		.word	.LC5
+ 547 04d8 8C000000 		.word	.LC6
+ 548 04dc A0000000 		.word	.LC7
+ 549 04e0 03040000 		.word	1027
+ 550 04e4 00000000 		.word	CyFxAoADmaCb
+ 551 04e8 00000000 		.word	glHostAoACh
+ 552 04ec 013F0000 		.word	16129
+ 553 04f0 00000000 		.word	glI2SLeftCh
+ 554 04f4 00000000 		.word	glI2SRightCh
+ 555 04f8 B4000000 		.word	.LC8
+ 556 04fc CC000000 		.word	.LC9
+ 557 0500 E0000000 		.word	.LC10
+ 558 0504 F8000000 		.word	.LC11
+ 559 0508 0C010000 		.word	.LC12
+ 560 050c 24010000 		.word	.LC13
+ 561 0510 40010000 		.word	.LC14
+ 562              		.cfi_endproc
+ 563              	.LFE1:
+ 565              		.align	2
+ 566              		.global	CyFxAOADriverDeInit
+ 568              	CyFxAOADriverDeInit:
+ 569              	.LFB2:
+ 289:../cyfxaoa.c  **** 
+ 290:../cyfxaoa.c  **** /* Disables the mouse driver. */
+ 291:../cyfxaoa.c  **** void
+ 292:../cyfxaoa.c  **** CyFxAOADriverDeInit ()
+ 293:../cyfxaoa.c  **** {
+ 570              		.loc 1 293 0
+ 571              		.cfi_startproc
+ 572              		@ args = 0, pretend = 0, frame = 0
+ 573              		@ frame_needed = 1, uses_anonymous_args = 0
+ 574              		@ link register save eliminated.
+ 575 0514 04B02DE5 		str	fp, [sp, #-4]!
+ 576              	.LCFI4:
+ 577              		.cfi_def_cfa_offset 4
+ 578 0518 00B08DE2 		add	fp, sp, #0
+ 579              		.cfi_offset 11, -4
+ 580              	.LCFI5:
+ 581              		.cfi_def_cfa_register 11
+ 294:../cyfxaoa.c  **** 
+ 295:../cyfxaoa.c  **** }
+ 582              		.loc 1 295 0
+ 583 051c 00D08BE2 		add	sp, fp, #0
+ 584 0520 04B09DE4 		ldmfd	sp!, {fp}
+ 585 0524 1EFF2FE1 		bx	lr
+ 586              		.cfi_endproc
+ 587              	.LFE2:
+ 589              		.align	2
+ 590              		.global	getProtocol
+ 592              	getProtocol:
+ 593              	.LFB3:
+ 296:../cyfxaoa.c  **** 
+ 297:../cyfxaoa.c  **** 
+ 298:../cyfxaoa.c  **** int getProtocol()
+ 299:../cyfxaoa.c  **** {
+ 594              		.loc 1 299 0
+ 595              		.cfi_startproc
+ 596              		@ args = 0, pretend = 0, frame = 8
+ 597              		@ frame_needed = 1, uses_anonymous_args = 0
+ 598 0528 00482DE9 		stmfd	sp!, {fp, lr}
+ 599              	.LCFI6:
+ 600              		.cfi_def_cfa_offset 8
+ 601 052c 04B08DE2 		add	fp, sp, #4
+ 602              		.cfi_offset 14, -4
+ 603              		.cfi_offset 11, -8
+ 604              	.LCFI7:
+ 605              		.cfi_def_cfa 11, 4
+ 606 0530 10D04DE2 		sub	sp, sp, #16
+ 300:../cyfxaoa.c  ****     int protocol = -1;
+ 607              		.loc 1 300 0
+ 608 0534 0030E0E3 		mvn	r3, #0
+ 609 0538 08300BE5 		str	r3, [fp, #-8]
+ 301:../cyfxaoa.c  ****     CyFxSendSetupRqt( USB_SETUP_DEVICE_TO_HOST |
+ 610              		.loc 1 301 0
+ 611 053c 0230A0E3 		mov	r3, #2
+ 612 0540 00308DE5 		str	r3, [sp, #0]
+ 613 0544 30309FE5 		ldr	r3, .L37
+ 614 0548 04308DE5 		str	r3, [sp, #4]
+ 615 054c C000A0E3 		mov	r0, #192
+ 616 0550 3310A0E3 		mov	r1, #51
+ 617 0554 0020A0E3 		mov	r2, #0
+ 618 0558 0030A0E3 		mov	r3, #0
+ 619 055c FEFFFFEB 		bl	CyFxSendSetupRqt
+ 302:../cyfxaoa.c  ****                 USB_SETUP_TYPE_VENDOR |
+ 303:../cyfxaoa.c  ****                 USB_SETUP_RECIPIENT_DEVICE,
+ 304:../cyfxaoa.c  ****                 ACCESSORY_GET_PROTOCOL,0,0,2,glEp0Buffer);
+ 305:../cyfxaoa.c  ****     protocol = glEp0Buffer[0];
+ 620              		.loc 1 305 0
+ 621 0560 14309FE5 		ldr	r3, .L37
+ 622 0564 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 623 0568 08300BE5 		str	r3, [fp, #-8]
+ 306:../cyfxaoa.c  ****     return protocol;
+ 624              		.loc 1 306 0
+ 625 056c 08301BE5 		ldr	r3, [fp, #-8]
+ 307:../cyfxaoa.c  **** }
+ 626              		.loc 1 307 0
+ 627 0570 0300A0E1 		mov	r0, r3
+ 628 0574 04D04BE2 		sub	sp, fp, #4
+ 629 0578 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 630              	.L38:
+ 631              		.align	2
+ 632              	.L37:
+ 633 057c 00000000 		.word	glEp0Buffer
+ 634              		.cfi_endproc
+ 635              	.LFE3:
+ 637              		.section	.rodata
+ 638 015b 00       		.align	2
+ 639              	.LC15:
+ 640 015c 496E2041 		.ascii	"In AOA Send String\015\012\000"
+ 640      4F412053 
+ 640      656E6420 
+ 640      53747269 
+ 640      6E670D0A 
+ 641              		.text
+ 642              		.align	2
+ 643              		.global	sendString
+ 645              	sendString:
+ 646              	.LFB4:
+ 308:../cyfxaoa.c  **** 
+ 309:../cyfxaoa.c  **** void sendString(int index, const char *str)
+ 310:../cyfxaoa.c  **** {
+ 647              		.loc 1 310 0
+ 648              		.cfi_startproc
+ 649              		@ args = 0, pretend = 0, frame = 8
+ 650              		@ frame_needed = 1, uses_anonymous_args = 0
+ 651 0580 10482DE9 		stmfd	sp!, {r4, fp, lr}
+ 652              	.LCFI8:
+ 653              		.cfi_def_cfa_offset 12
+ 654 0584 08B08DE2 		add	fp, sp, #8
+ 655              		.cfi_offset 14, -4
+ 656              		.cfi_offset 11, -8
+ 657              		.cfi_offset 4, -12
+ 658              	.LCFI9:
+ 659              		.cfi_def_cfa 11, 4
+ 660 0588 14D04DE2 		sub	sp, sp, #20
+ 661 058c 10000BE5 		str	r0, [fp, #-16]
+ 662 0590 14100BE5 		str	r1, [fp, #-20]
+ 311:../cyfxaoa.c  **** 	CyU3PDebugPrint (4, "In AOA Send String\r\n");
+ 663              		.loc 1 311 0
+ 664 0594 0400A0E3 		mov	r0, #4
+ 665 0598 54109FE5 		ldr	r1, .L40
+ 666 059c FEFFFFEB 		bl	CyU3PDebugPrint
+ 312:../cyfxaoa.c  **** 
+ 313:../cyfxaoa.c  ****     CyFxSendSetupRqt(USB_SETUP_HOST_TO_DEVICE |
+ 667              		.loc 1 313 0
+ 668 05a0 10301BE5 		ldr	r3, [fp, #-16]
+ 669 05a4 0338A0E1 		mov	r3, r3, asl #16
+ 670 05a8 2348A0E1 		mov	r4, r3, lsr #16
+ 314:../cyfxaoa.c  ****                 USB_SETUP_TYPE_VENDOR |
+ 315:../cyfxaoa.c  ****                 USB_SETUP_RECIPIENT_DEVICE,
+ 316:../cyfxaoa.c  ****                 ACCESSORY_SEND_STRING, 0,index,
+ 317:../cyfxaoa.c  ****                  strlen(str) + 1,(char *)str);
+ 671              		.loc 1 317 0
+ 672 05ac 14001BE5 		ldr	r0, [fp, #-20]
+ 673 05b0 FEFFFFEB 		bl	strlen
+ 674 05b4 0030A0E1 		mov	r3, r0
+ 313:../cyfxaoa.c  ****     CyFxSendSetupRqt(USB_SETUP_HOST_TO_DEVICE |
+ 675              		.loc 1 313 0
+ 676 05b8 0338A0E1 		mov	r3, r3, asl #16
+ 677 05bc 2338A0E1 		mov	r3, r3, lsr #16
+ 678 05c0 013083E2 		add	r3, r3, #1
+ 679 05c4 0338A0E1 		mov	r3, r3, asl #16
+ 680 05c8 2338A0E1 		mov	r3, r3, lsr #16
+ 681 05cc 00308DE5 		str	r3, [sp, #0]
+ 682 05d0 14301BE5 		ldr	r3, [fp, #-20]
+ 683 05d4 04308DE5 		str	r3, [sp, #4]
+ 684 05d8 4000A0E3 		mov	r0, #64
+ 685 05dc 3410A0E3 		mov	r1, #52
+ 686 05e0 0020A0E3 		mov	r2, #0
+ 687 05e4 0430A0E1 		mov	r3, r4
+ 688 05e8 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 318:../cyfxaoa.c  **** }
+ 689              		.loc 1 318 0
+ 690 05ec 08D04BE2 		sub	sp, fp, #8
+ 691 05f0 1088BDE8 		ldmfd	sp!, {r4, fp, pc}
+ 692              	.L41:
+ 693              		.align	2
+ 694              	.L40:
+ 695 05f4 5C010000 		.word	.LC15
+ 696              		.cfi_endproc
+ 697              	.LFE4:
+ 699              		.section	.rodata
+ 700 0171 000000   		.align	2
+ 701              	.LC16:
+ 702 0174 53776974 		.ascii	"Switch to AOA protocol\015\012\000"
+ 702      63682074 
+ 702      6F20414F 
+ 702      41207072 
+ 702      6F746F63 
+ 703 018d 000000   		.align	2
+ 704              	.LC17:
+ 705 0190 496E2041 		.ascii	"In AOA protocol version\015\012\000"
+ 705      4F412070 
+ 705      726F746F 
+ 705      636F6C20 
+ 705      76657273 
+ 706 01aa 0000     		.align	2
+ 707              	.LC18:
+ 708 01ac 43797072 		.ascii	"Cypress\000"
+ 708      65737300 
+ 709              		.align	2
+ 710              	.LC19:
+ 711 01b4 46583320 		.ascii	"FX3 NFC Reader\000"
+ 711      4E464320 
+ 711      52656164 
+ 711      657200
+ 712 01c3 00       		.align	2
+ 713              	.LC20:
+ 714 01c4 46583320 		.ascii	"FX3 Android Accessory NFC Reader\000"
+ 714      416E6472 
+ 714      6F696420 
+ 714      41636365 
+ 714      73736F72 
+ 715 01e5 000000   		.align	2
+ 716              	.LC21:
+ 717 01e8 302E3100 		.ascii	"0.1\000"
+ 718              		.align	2
+ 719              	.LC22:
+ 720 01ec 7777772E 		.ascii	"www.cypress.com\000"
+ 720      63797072 
+ 720      6573732E 
+ 720      636F6D00 
+ 721              		.align	2
+ 722              	.LC23:
+ 723 01fc 30313233 		.ascii	"0123456789\000"
+ 723      34353637 
+ 723      383900
+ 724 0207 00       		.align	2
+ 725              	.LC24:
+ 726 0208 414F4120 		.ascii	"AOA START %d\015\012\000"
+ 726      53544152 
+ 726      54202564 
+ 726      0D0A00
+ 727 0217 00       		.text
+ 728              		.align	2
+ 729              		.global	switch_to_acc
+ 731              	switch_to_acc:
+ 732              	.LFB5:
+ 319:../cyfxaoa.c  **** 
+ 320:../cyfxaoa.c  **** void switch_to_acc()
+ 321:../cyfxaoa.c  **** {
+ 733              		.loc 1 321 0
+ 734              		.cfi_startproc
+ 735              		@ args = 0, pretend = 0, frame = 8
+ 736              		@ frame_needed = 1, uses_anonymous_args = 0
+ 737 05f8 00482DE9 		stmfd	sp!, {fp, lr}
+ 738              	.LCFI10:
+ 739              		.cfi_def_cfa_offset 8
+ 740 05fc 04B08DE2 		add	fp, sp, #4
+ 741              		.cfi_offset 14, -4
+ 742              		.cfi_offset 11, -8
+ 743              	.LCFI11:
+ 744              		.cfi_def_cfa 11, 4
+ 745 0600 10D04DE2 		sub	sp, sp, #16
+ 322:../cyfxaoa.c  **** 	int status = 0;
+ 746              		.loc 1 322 0
+ 747 0604 0030A0E3 		mov	r3, #0
+ 748 0608 08300BE5 		str	r3, [fp, #-8]
+ 323:../cyfxaoa.c  **** 
+ 324:../cyfxaoa.c  ****     CyU3PDebugPrint (4, "Switch to AOA protocol\r\n");
+ 749              		.loc 1 324 0
+ 750 060c 0400A0E3 		mov	r0, #4
+ 751 0610 F4109FE5 		ldr	r1, .L43
+ 752 0614 FEFFFFEB 		bl	CyU3PDebugPrint
+ 325:../cyfxaoa.c  **** 
+ 326:../cyfxaoa.c  ****     CyU3PThreadSleep (100);
+ 753              		.loc 1 326 0
+ 754 0618 6400A0E3 		mov	r0, #100
+ 755 061c FEFFFFEB 		bl	_tx_thread_sleep
+ 327:../cyfxaoa.c  ****     CyU3PThreadSleep (100);
+ 756              		.loc 1 327 0
+ 757 0620 6400A0E3 		mov	r0, #100
+ 758 0624 FEFFFFEB 		bl	_tx_thread_sleep
+ 328:../cyfxaoa.c  **** 
+ 329:../cyfxaoa.c  **** 
+ 330:../cyfxaoa.c  ****     int aoa_proto_ver = getProtocol();
+ 759              		.loc 1 330 0
+ 760 0628 FEFFFFEB 		bl	getProtocol
+ 761 062c 0C000BE5 		str	r0, [fp, #-12]
+ 331:../cyfxaoa.c  **** 
+ 332:../cyfxaoa.c  ****     CyU3PDebugPrint (4, "In AOA protocol version\r\n");
+ 762              		.loc 1 332 0
+ 763 0630 0400A0E3 		mov	r0, #4
+ 764 0634 D4109FE5 		ldr	r1, .L43+4
+ 765 0638 FEFFFFEB 		bl	CyU3PDebugPrint
+ 333:../cyfxaoa.c  **** 
+ 334:../cyfxaoa.c  ****     if(aoa_proto_ver < 2)
+ 335:../cyfxaoa.c  ****     {
+ 336:../cyfxaoa.c  ****         //printf("Less than 2");
+ 337:../cyfxaoa.c  ****     }
+ 338:../cyfxaoa.c  ****     else if(aoa_proto_ver == 2)
+ 339:../cyfxaoa.c  ****     {
+ 340:../cyfxaoa.c  ****         //printf("Equals 2");
+ 341:../cyfxaoa.c  ****     }
+ 342:../cyfxaoa.c  ****     else
+ 343:../cyfxaoa.c  ****     {
+ 344:../cyfxaoa.c  ****        // printf("Other than 1 or 2");
+ 345:../cyfxaoa.c  ****     }
+ 346:../cyfxaoa.c  ****     sendString( ACCESSORY_STRING_MANUFACTURER, "Cypress");
+ 766              		.loc 1 346 0
+ 767 063c 0000A0E3 		mov	r0, #0
+ 768 0640 CC109FE5 		ldr	r1, .L43+8
+ 769 0644 FEFFFFEB 		bl	sendString
+ 347:../cyfxaoa.c  **** 
+ 348:../cyfxaoa.c  ****     sendString(ACCESSORY_STRING_MODEL, "FX3 NFC Reader");
+ 770              		.loc 1 348 0
+ 771 0648 0100A0E3 		mov	r0, #1
+ 772 064c C4109FE5 		ldr	r1, .L43+12
+ 773 0650 FEFFFFEB 		bl	sendString
+ 349:../cyfxaoa.c  **** 
+ 350:../cyfxaoa.c  ****     sendString( ACCESSORY_STRING_DESCRIPTION, "FX3 Android Accessory NFC Reader");
+ 774              		.loc 1 350 0
+ 775 0654 0200A0E3 		mov	r0, #2
+ 776 0658 BC109FE5 		ldr	r1, .L43+16
+ 777 065c FEFFFFEB 		bl	sendString
+ 351:../cyfxaoa.c  **** 
+ 352:../cyfxaoa.c  ****     sendString(ACCESSORY_STRING_VERSION, "0.1");
+ 778              		.loc 1 352 0
+ 779 0660 0300A0E3 		mov	r0, #3
+ 780 0664 B4109FE5 		ldr	r1, .L43+20
+ 781 0668 FEFFFFEB 		bl	sendString
+ 353:../cyfxaoa.c  **** 
+ 354:../cyfxaoa.c  ****     sendString(ACCESSORY_STRING_URI, "www.cypress.com");
+ 782              		.loc 1 354 0
+ 783 066c 0400A0E3 		mov	r0, #4
+ 784 0670 AC109FE5 		ldr	r1, .L43+24
+ 785 0674 FEFFFFEB 		bl	sendString
+ 355:../cyfxaoa.c  **** 
+ 356:../cyfxaoa.c  ****     sendString(ACCESSORY_STRING_SERIAL, "0123456789");
+ 786              		.loc 1 356 0
+ 787 0678 0500A0E3 		mov	r0, #5
+ 788 067c A4109FE5 		ldr	r1, .L43+28
+ 789 0680 FEFFFFEB 		bl	sendString
+ 357:../cyfxaoa.c  **** 
+ 358:../cyfxaoa.c  ****     status = CyFxSendSetupRqt(
+ 790              		.loc 1 358 0
+ 791 0684 0030A0E3 		mov	r3, #0
+ 792 0688 00308DE5 		str	r3, [sp, #0]
+ 793 068c 0030A0E3 		mov	r3, #0
+ 794 0690 04308DE5 		str	r3, [sp, #4]
+ 795 0694 4000A0E3 		mov	r0, #64
+ 796 0698 3A10A0E3 		mov	r1, #58
+ 797 069c 0120A0E3 		mov	r2, #1
+ 798 06a0 0030A0E3 		mov	r3, #0
+ 799 06a4 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 800 06a8 0030A0E1 		mov	r3, r0
+ 801 06ac 08300BE5 		str	r3, [fp, #-8]
+ 359:../cyfxaoa.c  ****                 USB_SETUP_HOST_TO_DEVICE |
+ 360:../cyfxaoa.c  ****                 USB_SETUP_TYPE_VENDOR |
+ 361:../cyfxaoa.c  ****                 USB_SETUP_RECIPIENT_DEVICE,
+ 362:../cyfxaoa.c  ****                 58, 1,0,
+ 363:../cyfxaoa.c  ****                  0,0);
+ 364:../cyfxaoa.c  **** 
+ 365:../cyfxaoa.c  **** 
+ 366:../cyfxaoa.c  ****     status = CyFxSendSetupRqt(
+ 802              		.loc 1 366 0
+ 803 06b0 0030A0E3 		mov	r3, #0
+ 804 06b4 00308DE5 		str	r3, [sp, #0]
+ 805 06b8 0030A0E3 		mov	r3, #0
+ 806 06bc 04308DE5 		str	r3, [sp, #4]
+ 807 06c0 4000A0E3 		mov	r0, #64
+ 808 06c4 3510A0E3 		mov	r1, #53
+ 809 06c8 0020A0E3 		mov	r2, #0
+ 810 06cc 0030A0E3 		mov	r3, #0
+ 811 06d0 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 812 06d4 0030A0E1 		mov	r3, r0
+ 813 06d8 08300BE5 		str	r3, [fp, #-8]
+ 367:../cyfxaoa.c  ****                 USB_SETUP_HOST_TO_DEVICE |
+ 368:../cyfxaoa.c  ****                 USB_SETUP_TYPE_VENDOR |
+ 369:../cyfxaoa.c  ****                 USB_SETUP_RECIPIENT_DEVICE,
+ 370:../cyfxaoa.c  ****                 ACCESSORY_START, 0,0,
+ 371:../cyfxaoa.c  ****                  0,0);
+ 372:../cyfxaoa.c  **** 
+ 373:../cyfxaoa.c  ****     CyU3PDebugPrint (4, "AOA START %d\r\n",status);
+ 814              		.loc 1 373 0
+ 815 06dc 0400A0E3 		mov	r0, #4
+ 816 06e0 44109FE5 		ldr	r1, .L43+32
+ 817 06e4 08201BE5 		ldr	r2, [fp, #-8]
+ 818 06e8 FEFFFFEB 		bl	CyU3PDebugPrint
+ 374:../cyfxaoa.c  **** 
+ 375:../cyfxaoa.c  ****     CyU3PThreadSleep (100);
+ 819              		.loc 1 375 0
+ 820 06ec 6400A0E3 		mov	r0, #100
+ 821 06f0 FEFFFFEB 		bl	_tx_thread_sleep
+ 376:../cyfxaoa.c  ****     CyU3PThreadSleep (100);
+ 822              		.loc 1 376 0
+ 823 06f4 6400A0E3 		mov	r0, #100
+ 824 06f8 FEFFFFEB 		bl	_tx_thread_sleep
+ 377:../cyfxaoa.c  ****     CyU3PThreadSleep (100);
+ 825              		.loc 1 377 0
+ 826 06fc 6400A0E3 		mov	r0, #100
+ 827 0700 FEFFFFEB 		bl	_tx_thread_sleep
+ 378:../cyfxaoa.c  **** 
+ 379:../cyfxaoa.c  **** }
+ 828              		.loc 1 379 0
+ 829 0704 04D04BE2 		sub	sp, fp, #4
+ 830 0708 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 831              	.L44:
+ 832              		.align	2
+ 833              	.L43:
+ 834 070c 74010000 		.word	.LC16
+ 835 0710 90010000 		.word	.LC17
+ 836 0714 AC010000 		.word	.LC18
+ 837 0718 B4010000 		.word	.LC19
+ 838 071c C4010000 		.word	.LC20
+ 839 0720 E8010000 		.word	.LC21
+ 840 0724 EC010000 		.word	.LC22
+ 841 0728 FC010000 		.word	.LC23
+ 842 072c 08020000 		.word	.LC24
+ 843              		.cfi_endproc
+ 844              	.LFE5:
+ 846              	.Letext0:
+DEFINED SYMBOLS
+                            *ABS*:00000000 cyfxaoa.c
+                            *COM*:00000028 glDMAEvent
+                            *COM*:000000a0 glHostAoACh
+                            *COM*:000000a0 glI2SRightCh
+                            *COM*:000000a0 glI2SLeftCh
+                            *COM*:00000004 prodCount
+                            *COM*:00000004 consCount
+                            *COM*:00000004 bufCount
+                            *COM*:00000004 lc
+                            *COM*:00000004 rc
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:30     .text:00000000 $a
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:33     .text:00000000 CyFxAoADmaCb
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:95     .text:00000090 $d
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:102    .rodata:00000000 $d
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:148    .text:0000009c $a
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:151    .text:0000009c CyFxAOADriverInit
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:540    .text:000004bc $d
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:565    .text:00000514 $a
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:568    .text:00000514 CyFxAOADriverDeInit
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:592    .text:00000528 getProtocol
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:633    .text:0000057c $d
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:642    .text:00000580 $a
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:645    .text:00000580 sendString
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:695    .text:000005f4 $d
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:728    .text:000005f8 $a
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:731    .text:000005f8 switch_to_acc
+C:\Users\kumr\AppData\Local\Temp\ccvz10Tk.s:834    .text:0000070c $d
+                     .debug_frame:00000010 $d
+
+UNDEFINED SYMBOLS
+_txe_event_flags_set
+CyU3PDebugPrint
+CyFxSendSetupRqt
+_tx_thread_sleep
+CyU3PMemSet
+CyU3PUsbHostEpAdd
+CyU3PDmaChannelCreate
+CyU3PDmaChannelSetXfer
+CyU3PUsbHostEpSetXfer
+CyU3PDmaChannelDestroy
+CyU3PUsbHostEpRemove
+glEp0Buffer
+strlen

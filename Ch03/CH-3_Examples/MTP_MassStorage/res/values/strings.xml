@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">MTP_MassStorage</string>
+    <string name="action_settings">Settings</string>
+    <string name="hello_world">Select Your Options to change modes</string>
+    <string name="MTP_Button_Name">MTP -> MSC</string>
+    <string name="MSC_Button_Name">MSC -> MTP</string>
+    <string name="default_config">Default</string>
+
+</resources>

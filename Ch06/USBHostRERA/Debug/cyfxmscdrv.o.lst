@@ -1,0 +1,2726 @@
+   1              		.cpu arm926ej-s
+   2              		.fpu softvfp
+   3              		.eabi_attribute 20, 1
+   4              		.eabi_attribute 21, 1
+   5              		.eabi_attribute 23, 3
+   6              		.eabi_attribute 24, 1
+   7              		.eabi_attribute 25, 1
+   8              		.eabi_attribute 26, 1
+   9              		.eabi_attribute 30, 6
+  10              		.eabi_attribute 18, 4
+  11              		.file	"cyfxmscdrv.c"
+  19              	.Ltext0:
+  20              		.cfi_sections	.debug_frame
+  21              		.comm	glDMAEvent,40,4
+  22              		.comm	glHostAoACh,160,4
+  23              		.comm	glI2SRightCh,160,4
+  24              		.comm	glI2SLeftCh,160,4
+  25              		.comm	prodCount,4,4
+  26              		.comm	consCount,4,4
+  27              		.comm	bufCount,4,4
+  28              		.comm	lc,4,4
+  29              		.comm	rc,4,4
+  30              		.global	glMscInEp
+  31              		.bss
+  34              	glMscInEp:
+  35 0000 00       		.space	1
+  36              		.global	glMscOutEp
+  39              	glMscOutEp:
+  40 0001 00       		.space	1
+  41              		.global	glMscEpSize
+  42              		.align	1
+  45              	glMscEpSize:
+  46 0002 0000     		.space	2
+  47              		.global	glMscSectorSize
+  48              		.align	1
+  51              	glMscSectorSize:
+  52 0004 0000     		.space	2
+  53              		.global	glMscCapacity
+  54 0006 0000     		.align	2
+  57              	glMscCapacity:
+  58 0008 00000000 		.space	4
+  59              		.global	glMscTestLun
+  62              	glMscTestLun:
+  63 000c 00       		.space	1
+  64              		.global	glMscTestSector
+  65 000d 000000   		.align	2
+  68              	glMscTestSector:
+  69 0010 00000000 		.space	4
+  70              		.global	glTimerCount
+  71              		.align	2
+  74              	glTimerCount:
+  75 0014 00000000 		.space	4
+  76              		.global	glMscIsActive
+  77              		.align	2
+  80              	glMscIsActive:
+  81 0018 00000000 		.space	4
+  82              		.comm	glMscInCh,160,4
+  83              		.comm	glMscOutCh,160,4
+  84              		.comm	glMscCBW,32,32
+  85              		.comm	glMscCSW,32,32
+  86              		.comm	glMscSector,4096,32
+  87              		.text
+  88              		.align	2
+  90              	CyFxMyFormatCBW:
+  91              	.LFB0:
+  92              		.file 1 "../cyfxmscdrv.c"
+   1:../cyfxmscdrv.c **** /*
+   2:../cyfxmscdrv.c ****  ## Cypress USB 3.0 Platform source file (cyfxmscdrv.c)
+   3:../cyfxmscdrv.c ****  ## ===========================
+   4:../cyfxmscdrv.c ****  ##
+   5:../cyfxmscdrv.c ****  ##  Copyright Cypress Semiconductor Corporation, 2010-2011,
+   6:../cyfxmscdrv.c ****  ##  All Rights Reserved
+   7:../cyfxmscdrv.c ****  ##  UNPUBLISHED, LICENSED SOFTWARE.
+   8:../cyfxmscdrv.c ****  ##
+   9:../cyfxmscdrv.c ****  ##  CONFIDENTIAL AND PROPRIETARY INFORMATION
+  10:../cyfxmscdrv.c ****  ##  WHICH IS THE PROPERTY OF CYPRESS.
+  11:../cyfxmscdrv.c ****  ##
+  12:../cyfxmscdrv.c ****  ##  Use of this file is governed
+  13:../cyfxmscdrv.c ****  ##  by the license agreement included in the file
+  14:../cyfxmscdrv.c ****  ##
+  15:../cyfxmscdrv.c ****  ##     <install>/license/license.txt
+  16:../cyfxmscdrv.c ****  ##
+  17:../cyfxmscdrv.c ****  ##  where <install> is the Cypress software
+  18:../cyfxmscdrv.c ****  ##  installation root directory path.
+  19:../cyfxmscdrv.c ****  ##
+  20:../cyfxmscdrv.c ****  ## ===========================
+  21:../cyfxmscdrv.c **** */
+  22:../cyfxmscdrv.c **** 
+  23:../cyfxmscdrv.c **** /* This file illustrates the MSC driver. */
+  24:../cyfxmscdrv.c **** 
+  25:../cyfxmscdrv.c **** /*
+  26:../cyfxmscdrv.c ****    A simple single interface USB BOT MSC device will be successfully 
+  27:../cyfxmscdrv.c ****    enumerated and storage parameters will be queried. The example shall read
+  28:../cyfxmscdrv.c ****    the last sector of data, save it in local buffers and write a fixed pattern
+  29:../cyfxmscdrv.c ****    to location. It will  then read and verify the data written. Once this is
+  30:../cyfxmscdrv.c ****    done, the original data will be written back to the storage.
+  31:../cyfxmscdrv.c ****    
+  32:../cyfxmscdrv.c ****    NOTE: If MSC device is unplugged before all transactions have completed
+  33:../cyfxmscdrv.c ****    or if the example encounters an error, the data on the drive might be
+  34:../cyfxmscdrv.c ****    corrupted.
+  35:../cyfxmscdrv.c **** */
+  36:../cyfxmscdrv.c **** 
+  37:../cyfxmscdrv.c **** #include "cyu3system.h"
+  38:../cyfxmscdrv.c **** #include "cyu3os.h"
+  39:../cyfxmscdrv.c **** #include "cyu3dma.h"
+  40:../cyfxmscdrv.c **** #include "cyu3error.h"
+  41:../cyfxmscdrv.c **** #include "cyu3usb.h"
+  42:../cyfxmscdrv.c **** #include "cyu3usbhost.h"
+  43:../cyfxmscdrv.c **** #include "cyu3usbotg.h"
+  44:../cyfxmscdrv.c **** #include "cyu3utils.h"
+  45:../cyfxmscdrv.c **** #include "cyfxusbhost.h"
+  46:../cyfxmscdrv.c **** 
+  47:../cyfxmscdrv.c **** uint8_t glMscInEp = 0;          /* MSC IN endpoint. */
+  48:../cyfxmscdrv.c **** uint8_t glMscOutEp = 0;         /* MSC OUT endpoint. */
+  49:../cyfxmscdrv.c **** 
+  50:../cyfxmscdrv.c **** uint16_t glMscEpSize = 0;       /* MSC endpoint size. */
+  51:../cyfxmscdrv.c **** uint16_t glMscSectorSize = 0;   /* MSC sector size. */
+  52:../cyfxmscdrv.c **** uint32_t glMscCapacity = 0;     /* Size of the MSC device in sectors. */
+  53:../cyfxmscdrv.c **** uint8_t  glMscTestLun = 0;      /* LUN to be used for testing. */
+  54:../cyfxmscdrv.c **** uint32_t glMscTestSector = 0;   /* Test sector address. */
+  55:../cyfxmscdrv.c **** uint32_t glTimerCount = 0;      /* Counter which maintains the up time for host stack. */
+  56:../cyfxmscdrv.c **** 
+  57:../cyfxmscdrv.c **** CyBool_t glMscIsActive = CyFalse;
+  58:../cyfxmscdrv.c **** 
+  59:../cyfxmscdrv.c **** CyU3PDmaChannel glMscInCh;      /* IN EP channel for ingress data. */
+  60:../cyfxmscdrv.c **** CyU3PDmaChannel glMscOutCh;     /* OUT EP channel for egress data. */
+  61:../cyfxmscdrv.c **** 
+  62:../cyfxmscdrv.c **** uint8_t glMscCBW[CY_FX_MSC_CBW_CSW_BUFFER_SIZE] __attribute__ ((aligned (32)));   /* Buffer to stor
+  63:../cyfxmscdrv.c **** uint8_t glMscCSW[CY_FX_MSC_CBW_CSW_BUFFER_SIZE] __attribute__ ((aligned (32)));   /* Buffer to stor
+  64:../cyfxmscdrv.c **** uint8_t glMscSector[CY_FX_MSC_MAX_SECTOR_SIZE] __attribute__ ((aligned (32)));    /* Buffer for MSC
+  65:../cyfxmscdrv.c **** 
+  66:../cyfxmscdrv.c **** static void
+  67:../cyfxmscdrv.c **** CyFxMyFormatCBW (
+  68:../cyfxmscdrv.c ****         uint8_t *cbw,
+  69:../cyfxmscdrv.c ****         uint32_t tag,
+  70:../cyfxmscdrv.c ****         uint32_t xferLength,
+  71:../cyfxmscdrv.c ****         CyBool_t isRead,
+  72:../cyfxmscdrv.c ****         uint8_t lun,
+  73:../cyfxmscdrv.c ****         uint8_t rqtLength)
+  74:../cyfxmscdrv.c **** {
+  93              		.loc 1 74 0
+  94              		.cfi_startproc
+  95              		@ args = 8, pretend = 0, frame = 16
+  96              		@ frame_needed = 1, uses_anonymous_args = 0
+  97 0000 00482DE9 		stmfd	sp!, {fp, lr}
+  98              	.LCFI0:
+  99              		.cfi_def_cfa_offset 8
+ 100 0004 04B08DE2 		add	fp, sp, #4
+ 101              		.cfi_offset 14, -4
+ 102              		.cfi_offset 11, -8
+ 103              	.LCFI1:
+ 104              		.cfi_def_cfa 11, 4
+ 105 0008 10D04DE2 		sub	sp, sp, #16
+ 106 000c 08000BE5 		str	r0, [fp, #-8]
+ 107 0010 0C100BE5 		str	r1, [fp, #-12]
+ 108 0014 10200BE5 		str	r2, [fp, #-16]
+ 109 0018 14300BE5 		str	r3, [fp, #-20]
+  75:../cyfxmscdrv.c ****     CyU3PMemSet (cbw, 0, 31);
+ 110              		.loc 1 75 0
+ 111 001c 08001BE5 		ldr	r0, [fp, #-8]
+ 112 0020 0010A0E3 		mov	r1, #0
+ 113 0024 1F20A0E3 		mov	r2, #31
+ 114 0028 FEFFFFEB 		bl	CyU3PMemSet
+  76:../cyfxmscdrv.c ****     cbw[0]  = 'U';
+ 115              		.loc 1 76 0
+ 116 002c 08301BE5 		ldr	r3, [fp, #-8]
+ 117 0030 5520A0E3 		mov	r2, #85
+ 118 0034 0020C3E5 		strb	r2, [r3, #0]
+  77:../cyfxmscdrv.c ****     cbw[1]  = 'S';
+ 119              		.loc 1 77 0
+ 120 0038 08301BE5 		ldr	r3, [fp, #-8]
+ 121 003c 013083E2 		add	r3, r3, #1
+ 122 0040 5320A0E3 		mov	r2, #83
+ 123 0044 0020C3E5 		strb	r2, [r3, #0]
+  78:../cyfxmscdrv.c ****     cbw[2]  = 'B';
+ 124              		.loc 1 78 0
+ 125 0048 08301BE5 		ldr	r3, [fp, #-8]
+ 126 004c 023083E2 		add	r3, r3, #2
+ 127 0050 4220A0E3 		mov	r2, #66
+ 128 0054 0020C3E5 		strb	r2, [r3, #0]
+  79:../cyfxmscdrv.c ****     cbw[3]  = 'C';
+ 129              		.loc 1 79 0
+ 130 0058 08301BE5 		ldr	r3, [fp, #-8]
+ 131 005c 033083E2 		add	r3, r3, #3
+ 132 0060 4320A0E3 		mov	r2, #67
+ 133 0064 0020C3E5 		strb	r2, [r3, #0]
+  80:../cyfxmscdrv.c ****     cbw[4]  = (uint8_t)((tag      ) & 0xFF);
+ 134              		.loc 1 80 0
+ 135 0068 08301BE5 		ldr	r3, [fp, #-8]
+ 136 006c 043083E2 		add	r3, r3, #4
+ 137 0070 0C201BE5 		ldr	r2, [fp, #-12]
+ 138 0074 FF2002E2 		and	r2, r2, #255
+ 139 0078 0020C3E5 		strb	r2, [r3, #0]
+  81:../cyfxmscdrv.c ****     cbw[5]  = (uint8_t)((tag >>  8) & 0xFF);
+ 140              		.loc 1 81 0
+ 141 007c 08301BE5 		ldr	r3, [fp, #-8]
+ 142 0080 053083E2 		add	r3, r3, #5
+ 143 0084 0C201BE5 		ldr	r2, [fp, #-12]
+ 144 0088 2224A0E1 		mov	r2, r2, lsr #8
+ 145 008c FF2002E2 		and	r2, r2, #255
+ 146 0090 0020C3E5 		strb	r2, [r3, #0]
+  82:../cyfxmscdrv.c ****     cbw[6]  = (uint8_t)((tag >> 16) & 0xFF);
+ 147              		.loc 1 82 0
+ 148 0094 08301BE5 		ldr	r3, [fp, #-8]
+ 149 0098 063083E2 		add	r3, r3, #6
+ 150 009c 0C201BE5 		ldr	r2, [fp, #-12]
+ 151 00a0 2228A0E1 		mov	r2, r2, lsr #16
+ 152 00a4 FF2002E2 		and	r2, r2, #255
+ 153 00a8 0020C3E5 		strb	r2, [r3, #0]
+  83:../cyfxmscdrv.c ****     cbw[7]  = (uint8_t)((tag >> 24) & 0xFF);
+ 154              		.loc 1 83 0
+ 155 00ac 08301BE5 		ldr	r3, [fp, #-8]
+ 156 00b0 073083E2 		add	r3, r3, #7
+ 157 00b4 0C201BE5 		ldr	r2, [fp, #-12]
+ 158 00b8 222CA0E1 		mov	r2, r2, lsr #24
+ 159 00bc FF2002E2 		and	r2, r2, #255
+ 160 00c0 0020C3E5 		strb	r2, [r3, #0]
+  84:../cyfxmscdrv.c ****     cbw[8]  = (uint8_t)((xferLength      ) & 0xFF);
+ 161              		.loc 1 84 0
+ 162 00c4 08301BE5 		ldr	r3, [fp, #-8]
+ 163 00c8 083083E2 		add	r3, r3, #8
+ 164 00cc 10201BE5 		ldr	r2, [fp, #-16]
+ 165 00d0 FF2002E2 		and	r2, r2, #255
+ 166 00d4 0020C3E5 		strb	r2, [r3, #0]
+  85:../cyfxmscdrv.c ****     cbw[9]  = (uint8_t)((xferLength >>  8) & 0xFF);
+ 167              		.loc 1 85 0
+ 168 00d8 08301BE5 		ldr	r3, [fp, #-8]
+ 169 00dc 093083E2 		add	r3, r3, #9
+ 170 00e0 10201BE5 		ldr	r2, [fp, #-16]
+ 171 00e4 2224A0E1 		mov	r2, r2, lsr #8
+ 172 00e8 FF2002E2 		and	r2, r2, #255
+ 173 00ec 0020C3E5 		strb	r2, [r3, #0]
+  86:../cyfxmscdrv.c ****     cbw[10] = (uint8_t)((xferLength >> 16) & 0xFF);
+ 174              		.loc 1 86 0
+ 175 00f0 08301BE5 		ldr	r3, [fp, #-8]
+ 176 00f4 0A3083E2 		add	r3, r3, #10
+ 177 00f8 10201BE5 		ldr	r2, [fp, #-16]
+ 178 00fc 2228A0E1 		mov	r2, r2, lsr #16
+ 179 0100 FF2002E2 		and	r2, r2, #255
+ 180 0104 0020C3E5 		strb	r2, [r3, #0]
+  87:../cyfxmscdrv.c ****     cbw[11] = (uint8_t)((xferLength >> 24) & 0xFF);
+ 181              		.loc 1 87 0
+ 182 0108 08301BE5 		ldr	r3, [fp, #-8]
+ 183 010c 0B3083E2 		add	r3, r3, #11
+ 184 0110 10201BE5 		ldr	r2, [fp, #-16]
+ 185 0114 222CA0E1 		mov	r2, r2, lsr #24
+ 186 0118 FF2002E2 		and	r2, r2, #255
+ 187 011c 0020C3E5 		strb	r2, [r3, #0]
+  88:../cyfxmscdrv.c ****     cbw[12] = (isRead) ? 0x80 : 0;
+ 188              		.loc 1 88 0
+ 189 0120 08301BE5 		ldr	r3, [fp, #-8]
+ 190 0124 0C2083E2 		add	r2, r3, #12
+ 191 0128 14301BE5 		ldr	r3, [fp, #-20]
+ 192 012c 000053E3 		cmp	r3, #0
+ 193 0130 0100000A 		beq	.L2
+ 194              		.loc 1 88 0 is_stmt 0 discriminator 1
+ 195 0134 8030A0E3 		mov	r3, #128
+ 196 0138 000000EA 		b	.L3
+ 197              	.L2:
+ 198              		.loc 1 88 0 discriminator 2
+ 199 013c 0030A0E3 		mov	r3, #0
+ 200              	.L3:
+ 201              		.loc 1 88 0 discriminator 3
+ 202 0140 0030C2E5 		strb	r3, [r2, #0]
+  89:../cyfxmscdrv.c ****     cbw[13] = lun;
+ 203              		.loc 1 89 0 is_stmt 1 discriminator 3
+ 204 0144 08301BE5 		ldr	r3, [fp, #-8]
+ 205 0148 0D3083E2 		add	r3, r3, #13
+ 206 014c 0420DBE5 		ldrb	r2, [fp, #4]
+ 207 0150 0020C3E5 		strb	r2, [r3, #0]
+  90:../cyfxmscdrv.c ****     cbw[14] = rqtLength;
+ 208              		.loc 1 90 0 discriminator 3
+ 209 0154 08301BE5 		ldr	r3, [fp, #-8]
+ 210 0158 0E3083E2 		add	r3, r3, #14
+ 211 015c 0820DBE5 		ldrb	r2, [fp, #8]
+ 212 0160 0020C3E5 		strb	r2, [r3, #0]
+  91:../cyfxmscdrv.c **** }
+ 213              		.loc 1 91 0 discriminator 3
+ 214 0164 04D04BE2 		sub	sp, fp, #4
+ 215 0168 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 216              		.cfi_endproc
+ 217              	.LFE0:
+ 219              		.align	2
+ 221              	CyFxMyFormatCmd:
+ 222              	.LFB1:
+  92:../cyfxmscdrv.c **** 
+  93:../cyfxmscdrv.c **** static void
+  94:../cyfxmscdrv.c **** CyFxMyFormatCmd (
+  95:../cyfxmscdrv.c ****         uint8_t *cbw,
+  96:../cyfxmscdrv.c ****         uint8_t opCode,
+  97:../cyfxmscdrv.c ****         uint32_t sectorAddr,
+  98:../cyfxmscdrv.c ****         uint16_t sectorCount)
+  99:../cyfxmscdrv.c **** {
+ 223              		.loc 1 99 0
+ 224              		.cfi_startproc
+ 225              		@ args = 0, pretend = 0, frame = 16
+ 226              		@ frame_needed = 1, uses_anonymous_args = 0
+ 227              		@ link register save eliminated.
+ 228 016c 04B02DE5 		str	fp, [sp, #-4]!
+ 229              	.LCFI2:
+ 230              		.cfi_def_cfa_offset 4
+ 231 0170 00B08DE2 		add	fp, sp, #0
+ 232              		.cfi_offset 11, -4
+ 233              	.LCFI3:
+ 234              		.cfi_def_cfa_register 11
+ 235 0174 14D04DE2 		sub	sp, sp, #20
+ 236 0178 08000BE5 		str	r0, [fp, #-8]
+ 237 017c 10200BE5 		str	r2, [fp, #-16]
+ 238 0180 0120A0E1 		mov	r2, r1
+ 239 0184 09204BE5 		strb	r2, [fp, #-9]
+ 240 0188 B2314BE1 		strh	r3, [fp, #-18]	@ movhi
+ 100:../cyfxmscdrv.c ****     cbw[15] = opCode;
+ 241              		.loc 1 100 0
+ 242 018c 08301BE5 		ldr	r3, [fp, #-8]
+ 243 0190 0F3083E2 		add	r3, r3, #15
+ 244 0194 09205BE5 		ldrb	r2, [fp, #-9]
+ 245 0198 0020C3E5 		strb	r2, [r3, #0]
+ 101:../cyfxmscdrv.c ****     cbw[17]  = (uint8_t)((sectorAddr >> 24) & 0xFF);
+ 246              		.loc 1 101 0
+ 247 019c 08301BE5 		ldr	r3, [fp, #-8]
+ 248 01a0 113083E2 		add	r3, r3, #17
+ 249 01a4 10201BE5 		ldr	r2, [fp, #-16]
+ 250 01a8 222CA0E1 		mov	r2, r2, lsr #24
+ 251 01ac FF2002E2 		and	r2, r2, #255
+ 252 01b0 0020C3E5 		strb	r2, [r3, #0]
+ 102:../cyfxmscdrv.c ****     cbw[18]  = (uint8_t)((sectorAddr >> 16) & 0xFF);
+ 253              		.loc 1 102 0
+ 254 01b4 08301BE5 		ldr	r3, [fp, #-8]
+ 255 01b8 123083E2 		add	r3, r3, #18
+ 256 01bc 10201BE5 		ldr	r2, [fp, #-16]
+ 257 01c0 2228A0E1 		mov	r2, r2, lsr #16
+ 258 01c4 FF2002E2 		and	r2, r2, #255
+ 259 01c8 0020C3E5 		strb	r2, [r3, #0]
+ 103:../cyfxmscdrv.c ****     cbw[19]  = (uint8_t)((sectorAddr >>  8) & 0xFF);
+ 260              		.loc 1 103 0
+ 261 01cc 08301BE5 		ldr	r3, [fp, #-8]
+ 262 01d0 133083E2 		add	r3, r3, #19
+ 263 01d4 10201BE5 		ldr	r2, [fp, #-16]
+ 264 01d8 2224A0E1 		mov	r2, r2, lsr #8
+ 265 01dc FF2002E2 		and	r2, r2, #255
+ 266 01e0 0020C3E5 		strb	r2, [r3, #0]
+ 104:../cyfxmscdrv.c ****     cbw[20]  = (uint8_t)((sectorAddr      ) & 0xFF);
+ 267              		.loc 1 104 0
+ 268 01e4 08301BE5 		ldr	r3, [fp, #-8]
+ 269 01e8 143083E2 		add	r3, r3, #20
+ 270 01ec 10201BE5 		ldr	r2, [fp, #-16]
+ 271 01f0 FF2002E2 		and	r2, r2, #255
+ 272 01f4 0020C3E5 		strb	r2, [r3, #0]
+ 105:../cyfxmscdrv.c ****     cbw[22]  = (uint8_t)((sectorCount >>  8) & 0xFF);
+ 273              		.loc 1 105 0
+ 274 01f8 08301BE5 		ldr	r3, [fp, #-8]
+ 275 01fc 163083E2 		add	r3, r3, #22
+ 276 0200 B2215BE1 		ldrh	r2, [fp, #-18]
+ 277 0204 2224A0E1 		mov	r2, r2, lsr #8
+ 278 0208 0228A0E1 		mov	r2, r2, asl #16
+ 279 020c 2228A0E1 		mov	r2, r2, lsr #16
+ 280 0210 FF2002E2 		and	r2, r2, #255
+ 281 0214 0020C3E5 		strb	r2, [r3, #0]
+ 106:../cyfxmscdrv.c ****     cbw[23]  = (uint8_t)((sectorCount      ) & 0xFF);
+ 282              		.loc 1 106 0
+ 283 0218 08301BE5 		ldr	r3, [fp, #-8]
+ 284 021c 173083E2 		add	r3, r3, #23
+ 285 0220 B2215BE1 		ldrh	r2, [fp, #-18]	@ movhi
+ 286 0224 FF2002E2 		and	r2, r2, #255
+ 287 0228 0020C3E5 		strb	r2, [r3, #0]
+ 107:../cyfxmscdrv.c **** }
+ 288              		.loc 1 107 0
+ 289 022c 00D08BE2 		add	sp, fp, #0
+ 290 0230 04B09DE4 		ldmfd	sp!, {fp}
+ 291 0234 1EFF2FE1 		bx	lr
+ 292              		.cfi_endproc
+ 293              	.LFE1:
+ 295              		.align	2
+ 296              		.global	CyFxMscErrorRecovery
+ 298              	CyFxMscErrorRecovery:
+ 299              	.LFB2:
+ 108:../cyfxmscdrv.c **** 
+ 109:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 110:../cyfxmscdrv.c **** CyFxMscErrorRecovery (
+ 111:../cyfxmscdrv.c ****         void)
+ 112:../cyfxmscdrv.c **** {
+ 300              		.loc 1 112 0
+ 301              		.cfi_startproc
+ 302              		@ args = 0, pretend = 0, frame = 8
+ 303              		@ frame_needed = 1, uses_anonymous_args = 0
+ 304 0238 00482DE9 		stmfd	sp!, {fp, lr}
+ 305              	.LCFI4:
+ 306              		.cfi_def_cfa_offset 8
+ 307 023c 04B08DE2 		add	fp, sp, #4
+ 308              		.cfi_offset 14, -4
+ 309              		.cfi_offset 11, -8
+ 310              	.LCFI5:
+ 311              		.cfi_def_cfa 11, 4
+ 312 0240 10D04DE2 		sub	sp, sp, #16
+ 113:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 313              		.loc 1 113 0
+ 314 0244 0030A0E3 		mov	r3, #0
+ 315 0248 08300BE5 		str	r3, [fp, #-8]
+ 114:../cyfxmscdrv.c **** 
+ 115:../cyfxmscdrv.c ****     /* Abort and reset the IN endpoint. */
+ 116:../cyfxmscdrv.c ****     if (glMscInEp != 0)
+ 316              		.loc 1 116 0
+ 317 024c FC309FE5 		ldr	r3, .L8
+ 318 0250 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 319 0254 000053E3 		cmp	r3, #0
+ 320 0258 1800000A 		beq	.L6
+ 117:../cyfxmscdrv.c ****     {
+ 118:../cyfxmscdrv.c ****         CyU3PDmaChannelReset (&glMscInCh);
+ 321              		.loc 1 118 0
+ 322 025c F0009FE5 		ldr	r0, .L8+4
+ 323 0260 FEFFFFEB 		bl	CyU3PDmaChannelReset
+ 119:../cyfxmscdrv.c ****         CyU3PUsbHostEpAbort (glMscInEp);
+ 324              		.loc 1 119 0
+ 325 0264 E4309FE5 		ldr	r3, .L8
+ 326 0268 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 327 026c 0300A0E1 		mov	r0, r3
+ 328 0270 FEFFFFEB 		bl	CyU3PUsbHostEpAbort
+ 120:../cyfxmscdrv.c **** 
+ 121:../cyfxmscdrv.c ****         status = CyFxSendSetupRqt (0x02, CY_U3P_USB_SC_CLEAR_FEATURE,
+ 329              		.loc 1 121 0
+ 330 0274 D4309FE5 		ldr	r3, .L8
+ 331 0278 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 332 027c 0020A0E3 		mov	r2, #0
+ 333 0280 00208DE5 		str	r2, [sp, #0]
+ 334 0284 CC209FE5 		ldr	r2, .L8+8
+ 335 0288 04208DE5 		str	r2, [sp, #4]
+ 336 028c 0200A0E3 		mov	r0, #2
+ 337 0290 0110A0E3 		mov	r1, #1
+ 338 0294 0020A0E3 		mov	r2, #0
+ 339 0298 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 340 029c 08000BE5 		str	r0, [fp, #-8]
+ 122:../cyfxmscdrv.c ****                 0, glMscInEp, 0, glEp0Buffer);
+ 123:../cyfxmscdrv.c ****         if (status == CY_U3P_SUCCESS)
+ 341              		.loc 1 123 0
+ 342 02a0 08301BE5 		ldr	r3, [fp, #-8]
+ 343 02a4 000053E3 		cmp	r3, #0
+ 344 02a8 0400001A 		bne	.L6
+ 124:../cyfxmscdrv.c ****         {
+ 125:../cyfxmscdrv.c ****             status = CyU3PUsbHostEpReset (glMscInEp);
+ 345              		.loc 1 125 0
+ 346 02ac 9C309FE5 		ldr	r3, .L8
+ 347 02b0 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 348 02b4 0300A0E1 		mov	r0, r3
+ 349 02b8 FEFFFFEB 		bl	CyU3PUsbHostEpReset
+ 350 02bc 08000BE5 		str	r0, [fp, #-8]
+ 351              	.L6:
+ 126:../cyfxmscdrv.c ****         }
+ 127:../cyfxmscdrv.c ****     }
+ 128:../cyfxmscdrv.c **** 
+ 129:../cyfxmscdrv.c ****     /* Abort and reset the OUT endpoint. */
+ 130:../cyfxmscdrv.c ****     if ((status == CY_U3P_SUCCESS) && (glMscOutEp != 0))
+ 352              		.loc 1 130 0
+ 353 02c0 08301BE5 		ldr	r3, [fp, #-8]
+ 354 02c4 000053E3 		cmp	r3, #0
+ 355 02c8 1C00001A 		bne	.L7
+ 356              		.loc 1 130 0 is_stmt 0 discriminator 1
+ 357 02cc 88309FE5 		ldr	r3, .L8+12
+ 358 02d0 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 359 02d4 000053E3 		cmp	r3, #0
+ 360 02d8 1800000A 		beq	.L7
+ 131:../cyfxmscdrv.c ****     {
+ 132:../cyfxmscdrv.c ****         CyU3PDmaChannelReset (&glMscOutCh);
+ 361              		.loc 1 132 0 is_stmt 1
+ 362 02dc 7C009FE5 		ldr	r0, .L8+16
+ 363 02e0 FEFFFFEB 		bl	CyU3PDmaChannelReset
+ 133:../cyfxmscdrv.c ****         CyU3PUsbHostEpAbort (glMscOutEp);
+ 364              		.loc 1 133 0
+ 365 02e4 70309FE5 		ldr	r3, .L8+12
+ 366 02e8 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 367 02ec 0300A0E1 		mov	r0, r3
+ 368 02f0 FEFFFFEB 		bl	CyU3PUsbHostEpAbort
+ 134:../cyfxmscdrv.c **** 
+ 135:../cyfxmscdrv.c ****         status = CyFxSendSetupRqt (0x02, CY_U3P_USB_SC_CLEAR_FEATURE,
+ 369              		.loc 1 135 0
+ 370 02f4 60309FE5 		ldr	r3, .L8+12
+ 371 02f8 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 372 02fc 0020A0E3 		mov	r2, #0
+ 373 0300 00208DE5 		str	r2, [sp, #0]
+ 374 0304 4C209FE5 		ldr	r2, .L8+8
+ 375 0308 04208DE5 		str	r2, [sp, #4]
+ 376 030c 0200A0E3 		mov	r0, #2
+ 377 0310 0110A0E3 		mov	r1, #1
+ 378 0314 0020A0E3 		mov	r2, #0
+ 379 0318 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 380 031c 08000BE5 		str	r0, [fp, #-8]
+ 136:../cyfxmscdrv.c ****                 0, glMscOutEp, 0, glEp0Buffer);
+ 137:../cyfxmscdrv.c ****         if (status == CY_U3P_SUCCESS)
+ 381              		.loc 1 137 0
+ 382 0320 08301BE5 		ldr	r3, [fp, #-8]
+ 383 0324 000053E3 		cmp	r3, #0
+ 384 0328 0400001A 		bne	.L7
+ 138:../cyfxmscdrv.c ****         {
+ 139:../cyfxmscdrv.c ****             status = CyU3PUsbHostEpReset (glMscOutEp);
+ 385              		.loc 1 139 0
+ 386 032c 28309FE5 		ldr	r3, .L8+12
+ 387 0330 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 388 0334 0300A0E1 		mov	r0, r3
+ 389 0338 FEFFFFEB 		bl	CyU3PUsbHostEpReset
+ 390 033c 08000BE5 		str	r0, [fp, #-8]
+ 391              	.L7:
+ 140:../cyfxmscdrv.c ****         }
+ 141:../cyfxmscdrv.c ****     }
+ 142:../cyfxmscdrv.c **** 
+ 143:../cyfxmscdrv.c ****     return status;
+ 392              		.loc 1 143 0
+ 393 0340 08301BE5 		ldr	r3, [fp, #-8]
+ 144:../cyfxmscdrv.c **** }
+ 394              		.loc 1 144 0
+ 395 0344 0300A0E1 		mov	r0, r3
+ 396 0348 04D04BE2 		sub	sp, fp, #4
+ 397 034c 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 398              	.L9:
+ 399              		.align	2
+ 400              	.L8:
+ 401 0350 00000000 		.word	glMscInEp
+ 402 0354 00000000 		.word	glMscInCh
+ 403 0358 00000000 		.word	glEp0Buffer
+ 404 035c 00000000 		.word	glMscOutEp
+ 405 0360 00000000 		.word	glMscOutCh
+ 406              		.cfi_endproc
+ 407              	.LFE2:
+ 409              		.align	2
+ 410              		.global	CyFxMscSendBuffer
+ 412              	CyFxMscSendBuffer:
+ 413              	.LFB3:
+ 145:../cyfxmscdrv.c **** 
+ 146:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 147:../cyfxmscdrv.c **** CyFxMscSendBuffer (
+ 148:../cyfxmscdrv.c ****         uint8_t *buffer,
+ 149:../cyfxmscdrv.c ****         uint16_t count)
+ 150:../cyfxmscdrv.c **** {
+ 414              		.loc 1 150 0
+ 415              		.cfi_startproc
+ 416              		@ args = 0, pretend = 0, frame = 32
+ 417              		@ frame_needed = 1, uses_anonymous_args = 0
+ 418 0364 00482DE9 		stmfd	sp!, {fp, lr}
+ 419              	.LCFI6:
+ 420              		.cfi_def_cfa_offset 8
+ 421 0368 04B08DE2 		add	fp, sp, #4
+ 422              		.cfi_offset 14, -4
+ 423              		.cfi_offset 11, -8
+ 424              	.LCFI7:
+ 425              		.cfi_def_cfa 11, 4
+ 426 036c 20D04DE2 		sub	sp, sp, #32
+ 427 0370 20000BE5 		str	r0, [fp, #-32]
+ 428 0374 0130A0E1 		mov	r3, r1
+ 429 0378 B2324BE1 		strh	r3, [fp, #-34]	@ movhi
+ 151:../cyfxmscdrv.c ****     CyU3PDmaBuffer_t buf_p;
+ 152:../cyfxmscdrv.c ****     CyU3PUsbHostEpStatus_t epStatus;
+ 153:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 430              		.loc 1 153 0
+ 431 037c 0030A0E3 		mov	r3, #0
+ 432 0380 08300BE5 		str	r3, [fp, #-8]
+ 154:../cyfxmscdrv.c **** 
+ 155:../cyfxmscdrv.c ****     /* Setup the DMA for transfer. */
+ 156:../cyfxmscdrv.c ****     buf_p.buffer = buffer;
+ 433              		.loc 1 156 0
+ 434 0384 20301BE5 		ldr	r3, [fp, #-32]
+ 435 0388 14300BE5 		str	r3, [fp, #-20]
+ 157:../cyfxmscdrv.c ****     buf_p.count  = count;
+ 436              		.loc 1 157 0
+ 437 038c B2325BE1 		ldrh	r3, [fp, #-34]	@ movhi
+ 438 0390 B0314BE1 		strh	r3, [fp, #-16]	@ movhi
+ 158:../cyfxmscdrv.c ****     buf_p.size   = ((count + 0x0F) & ~0x0F);
+ 439              		.loc 1 158 0
+ 440 0394 B2325BE1 		ldrh	r3, [fp, #-34]	@ movhi
+ 441 0398 0F3083E2 		add	r3, r3, #15
+ 442 039c 0338A0E1 		mov	r3, r3, asl #16
+ 443 03a0 2338A0E1 		mov	r3, r3, lsr #16
+ 444 03a4 0F30C3E3 		bic	r3, r3, #15
+ 445 03a8 0338A0E1 		mov	r3, r3, asl #16
+ 446 03ac 2338A0E1 		mov	r3, r3, lsr #16
+ 447 03b0 BE304BE1 		strh	r3, [fp, #-14]	@ movhi
+ 159:../cyfxmscdrv.c ****     buf_p.status = 0;
+ 448              		.loc 1 159 0
+ 449 03b4 0030A0E3 		mov	r3, #0
+ 450 03b8 BC304BE1 		strh	r3, [fp, #-12]	@ movhi
+ 160:../cyfxmscdrv.c ****     status = CyU3PDmaChannelSetupSendBuffer (&glMscOutCh, &buf_p);
+ 451              		.loc 1 160 0
+ 452 03bc 14304BE2 		sub	r3, fp, #20
+ 453 03c0 9C009FE5 		ldr	r0, .L15
+ 454 03c4 0310A0E1 		mov	r1, r3
+ 455 03c8 FEFFFFEB 		bl	CyU3PDmaChannelSetupSendBuffer
+ 456 03cc 08000BE5 		str	r0, [fp, #-8]
+ 161:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 457              		.loc 1 161 0
+ 458 03d0 08301BE5 		ldr	r3, [fp, #-8]
+ 459 03d4 000053E3 		cmp	r3, #0
+ 460 03d8 0700001A 		bne	.L11
+ 162:../cyfxmscdrv.c ****     {
+ 163:../cyfxmscdrv.c ****         status = CyU3PUsbHostEpSetXfer (glMscOutEp,
+ 461              		.loc 1 163 0
+ 462 03dc 84309FE5 		ldr	r3, .L15+4
+ 463 03e0 0020D3E5 		ldrb	r2, [r3, #0]	@ zero_extendqisi2
+ 464 03e4 B2325BE1 		ldrh	r3, [fp, #-34]
+ 465 03e8 0200A0E1 		mov	r0, r2
+ 466 03ec 0010A0E3 		mov	r1, #0
+ 467 03f0 0320A0E1 		mov	r2, r3
+ 468 03f4 FEFFFFEB 		bl	CyU3PUsbHostEpSetXfer
+ 469 03f8 08000BE5 		str	r0, [fp, #-8]
+ 470              	.L11:
+ 164:../cyfxmscdrv.c ****                 CY_U3P_USB_HOST_EPXFER_NORMAL, count);
+ 165:../cyfxmscdrv.c ****     }
+ 166:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 471              		.loc 1 166 0
+ 472 03fc 08301BE5 		ldr	r3, [fp, #-8]
+ 473 0400 000053E3 		cmp	r3, #0
+ 474 0404 0700001A 		bne	.L12
+ 167:../cyfxmscdrv.c ****     {
+ 168:../cyfxmscdrv.c ****         status = CyU3PUsbHostEpWaitForCompletion (glMscOutEp, &epStatus,
+ 475              		.loc 1 168 0
+ 476 0408 58309FE5 		ldr	r3, .L15+4
+ 477 040c 0020D3E5 		ldrb	r2, [r3, #0]	@ zero_extendqisi2
+ 478 0410 18304BE2 		sub	r3, fp, #24
+ 479 0414 0200A0E1 		mov	r0, r2
+ 480 0418 0310A0E1 		mov	r1, r3
+ 481 041c 48209FE5 		ldr	r2, .L15+8
+ 482 0420 FEFFFFEB 		bl	CyU3PUsbHostEpWaitForCompletion
+ 483 0424 08000BE5 		str	r0, [fp, #-8]
+ 484              	.L12:
+ 169:../cyfxmscdrv.c ****                 CY_FX_MSC_WAIT_TIMEOUT);
+ 170:../cyfxmscdrv.c ****     }
+ 171:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 485              		.loc 1 171 0
+ 486 0428 08301BE5 		ldr	r3, [fp, #-8]
+ 487 042c 000053E3 		cmp	r3, #0
+ 488 0430 0300001A 		bne	.L13
+ 172:../cyfxmscdrv.c ****     {
+ 173:../cyfxmscdrv.c ****         status = CyU3PDmaChannelWaitForCompletion (&glMscOutCh, CYU3P_NO_WAIT);
+ 489              		.loc 1 173 0
+ 490 0434 28009FE5 		ldr	r0, .L15
+ 491 0438 0010A0E3 		mov	r1, #0
+ 492 043c FEFFFFEB 		bl	CyU3PDmaChannelWaitForCompletion
+ 493 0440 08000BE5 		str	r0, [fp, #-8]
+ 494              	.L13:
+ 174:../cyfxmscdrv.c ****     }
+ 175:../cyfxmscdrv.c **** 
+ 176:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 495              		.loc 1 176 0
+ 496 0444 08301BE5 		ldr	r3, [fp, #-8]
+ 497 0448 000053E3 		cmp	r3, #0
+ 498 044c 0000000A 		beq	.L14
+ 177:../cyfxmscdrv.c ****     {
+ 178:../cyfxmscdrv.c ****         CyFxMscErrorRecovery ();
+ 499              		.loc 1 178 0
+ 500 0450 FEFFFFEB 		bl	CyFxMscErrorRecovery
+ 501              	.L14:
+ 179:../cyfxmscdrv.c ****     }
+ 180:../cyfxmscdrv.c **** 
+ 181:../cyfxmscdrv.c ****     return status;
+ 502              		.loc 1 181 0
+ 503 0454 08301BE5 		ldr	r3, [fp, #-8]
+ 182:../cyfxmscdrv.c **** }
+ 504              		.loc 1 182 0
+ 505 0458 0300A0E1 		mov	r0, r3
+ 506 045c 04D04BE2 		sub	sp, fp, #4
+ 507 0460 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 508              	.L16:
+ 509              		.align	2
+ 510              	.L15:
+ 511 0464 00000000 		.word	glMscOutCh
+ 512 0468 00000000 		.word	glMscOutEp
+ 513 046c 88130000 		.word	5000
+ 514              		.cfi_endproc
+ 515              	.LFE3:
+ 517              		.align	2
+ 518              		.global	CyFxMscRecvBuffer
+ 520              	CyFxMscRecvBuffer:
+ 521              	.LFB4:
+ 183:../cyfxmscdrv.c **** 
+ 184:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 185:../cyfxmscdrv.c **** CyFxMscRecvBuffer (
+ 186:../cyfxmscdrv.c ****         uint8_t *buffer,
+ 187:../cyfxmscdrv.c ****         uint16_t count)
+ 188:../cyfxmscdrv.c **** {
+ 522              		.loc 1 188 0
+ 523              		.cfi_startproc
+ 524              		@ args = 0, pretend = 0, frame = 32
+ 525              		@ frame_needed = 1, uses_anonymous_args = 0
+ 526 0470 00482DE9 		stmfd	sp!, {fp, lr}
+ 527              	.LCFI8:
+ 528              		.cfi_def_cfa_offset 8
+ 529 0474 04B08DE2 		add	fp, sp, #4
+ 530              		.cfi_offset 14, -4
+ 531              		.cfi_offset 11, -8
+ 532              	.LCFI9:
+ 533              		.cfi_def_cfa 11, 4
+ 534 0478 20D04DE2 		sub	sp, sp, #32
+ 535 047c 20000BE5 		str	r0, [fp, #-32]
+ 536 0480 0130A0E1 		mov	r3, r1
+ 537 0484 B2324BE1 		strh	r3, [fp, #-34]	@ movhi
+ 189:../cyfxmscdrv.c ****     CyU3PDmaBuffer_t buf_p;
+ 190:../cyfxmscdrv.c ****     CyU3PUsbHostEpStatus_t epStatus;
+ 191:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 538              		.loc 1 191 0
+ 539 0488 0030A0E3 		mov	r3, #0
+ 540 048c 08300BE5 		str	r3, [fp, #-8]
+ 192:../cyfxmscdrv.c **** 
+ 193:../cyfxmscdrv.c ****     /* Setup the DMA for transfer. */
+ 194:../cyfxmscdrv.c ****     buf_p.buffer = buffer;
+ 541              		.loc 1 194 0
+ 542 0490 20301BE5 		ldr	r3, [fp, #-32]
+ 543 0494 14300BE5 		str	r3, [fp, #-20]
+ 195:../cyfxmscdrv.c ****     buf_p.count  = 0;
+ 544              		.loc 1 195 0
+ 545 0498 0030A0E3 		mov	r3, #0
+ 546 049c B0314BE1 		strh	r3, [fp, #-16]	@ movhi
+ 196:../cyfxmscdrv.c ****     buf_p.size   = ((count + 0x0F) & ~0x0F);
+ 547              		.loc 1 196 0
+ 548 04a0 B2325BE1 		ldrh	r3, [fp, #-34]	@ movhi
+ 549 04a4 0F3083E2 		add	r3, r3, #15
+ 550 04a8 0338A0E1 		mov	r3, r3, asl #16
+ 551 04ac 2338A0E1 		mov	r3, r3, lsr #16
+ 552 04b0 0F30C3E3 		bic	r3, r3, #15
+ 553 04b4 0338A0E1 		mov	r3, r3, asl #16
+ 554 04b8 2338A0E1 		mov	r3, r3, lsr #16
+ 555 04bc BE304BE1 		strh	r3, [fp, #-14]	@ movhi
+ 197:../cyfxmscdrv.c ****     buf_p.status = 0;
+ 556              		.loc 1 197 0
+ 557 04c0 0030A0E3 		mov	r3, #0
+ 558 04c4 BC304BE1 		strh	r3, [fp, #-12]	@ movhi
+ 198:../cyfxmscdrv.c ****     status = CyU3PDmaChannelSetupRecvBuffer (&glMscInCh, &buf_p);
+ 559              		.loc 1 198 0
+ 560 04c8 14304BE2 		sub	r3, fp, #20
+ 561 04cc 9C009FE5 		ldr	r0, .L22
+ 562 04d0 0310A0E1 		mov	r1, r3
+ 563 04d4 FEFFFFEB 		bl	CyU3PDmaChannelSetupRecvBuffer
+ 564 04d8 08000BE5 		str	r0, [fp, #-8]
+ 199:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 565              		.loc 1 199 0
+ 566 04dc 08301BE5 		ldr	r3, [fp, #-8]
+ 567 04e0 000053E3 		cmp	r3, #0
+ 568 04e4 0700001A 		bne	.L18
+ 200:../cyfxmscdrv.c ****     {
+ 201:../cyfxmscdrv.c ****         status = CyU3PUsbHostEpSetXfer (glMscInEp,
+ 569              		.loc 1 201 0
+ 570 04e8 84309FE5 		ldr	r3, .L22+4
+ 571 04ec 0020D3E5 		ldrb	r2, [r3, #0]	@ zero_extendqisi2
+ 572 04f0 B2325BE1 		ldrh	r3, [fp, #-34]
+ 573 04f4 0200A0E1 		mov	r0, r2
+ 574 04f8 0010A0E3 		mov	r1, #0
+ 575 04fc 0320A0E1 		mov	r2, r3
+ 576 0500 FEFFFFEB 		bl	CyU3PUsbHostEpSetXfer
+ 577 0504 08000BE5 		str	r0, [fp, #-8]
+ 578              	.L18:
+ 202:../cyfxmscdrv.c ****                 CY_U3P_USB_HOST_EPXFER_NORMAL, count);
+ 203:../cyfxmscdrv.c ****     }
+ 204:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 579              		.loc 1 204 0
+ 580 0508 08301BE5 		ldr	r3, [fp, #-8]
+ 581 050c 000053E3 		cmp	r3, #0
+ 582 0510 0700001A 		bne	.L19
+ 205:../cyfxmscdrv.c ****     {
+ 206:../cyfxmscdrv.c ****         status = CyU3PUsbHostEpWaitForCompletion (glMscInEp, &epStatus,
+ 583              		.loc 1 206 0
+ 584 0514 58309FE5 		ldr	r3, .L22+4
+ 585 0518 0020D3E5 		ldrb	r2, [r3, #0]	@ zero_extendqisi2
+ 586 051c 18304BE2 		sub	r3, fp, #24
+ 587 0520 0200A0E1 		mov	r0, r2
+ 588 0524 0310A0E1 		mov	r1, r3
+ 589 0528 48209FE5 		ldr	r2, .L22+8
+ 590 052c FEFFFFEB 		bl	CyU3PUsbHostEpWaitForCompletion
+ 591 0530 08000BE5 		str	r0, [fp, #-8]
+ 592              	.L19:
+ 207:../cyfxmscdrv.c ****                 CY_FX_MSC_WAIT_TIMEOUT);
+ 208:../cyfxmscdrv.c ****     }
+ 209:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 593              		.loc 1 209 0
+ 594 0534 08301BE5 		ldr	r3, [fp, #-8]
+ 595 0538 000053E3 		cmp	r3, #0
+ 596 053c 0300001A 		bne	.L20
+ 210:../cyfxmscdrv.c ****     {
+ 211:../cyfxmscdrv.c ****         status = CyU3PDmaChannelWaitForCompletion (&glMscInCh, CYU3P_NO_WAIT);
+ 597              		.loc 1 211 0
+ 598 0540 28009FE5 		ldr	r0, .L22
+ 599 0544 0010A0E3 		mov	r1, #0
+ 600 0548 FEFFFFEB 		bl	CyU3PDmaChannelWaitForCompletion
+ 601 054c 08000BE5 		str	r0, [fp, #-8]
+ 602              	.L20:
+ 212:../cyfxmscdrv.c ****     }
+ 213:../cyfxmscdrv.c **** 
+ 214:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 603              		.loc 1 214 0
+ 604 0550 08301BE5 		ldr	r3, [fp, #-8]
+ 605 0554 000053E3 		cmp	r3, #0
+ 606 0558 0000000A 		beq	.L21
+ 215:../cyfxmscdrv.c ****     {
+ 216:../cyfxmscdrv.c ****         CyFxMscErrorRecovery ();
+ 607              		.loc 1 216 0
+ 608 055c FEFFFFEB 		bl	CyFxMscErrorRecovery
+ 609              	.L21:
+ 217:../cyfxmscdrv.c ****     }
+ 218:../cyfxmscdrv.c **** 
+ 219:../cyfxmscdrv.c ****     return status;
+ 610              		.loc 1 219 0
+ 611 0560 08301BE5 		ldr	r3, [fp, #-8]
+ 220:../cyfxmscdrv.c **** }
+ 612              		.loc 1 220 0
+ 613 0564 0300A0E1 		mov	r0, r3
+ 614 0568 04D04BE2 		sub	sp, fp, #4
+ 615 056c 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 616              	.L23:
+ 617              		.align	2
+ 618              	.L22:
+ 619 0570 00000000 		.word	glMscInCh
+ 620 0574 00000000 		.word	glMscInEp
+ 621 0578 88130000 		.word	5000
+ 622              		.cfi_endproc
+ 623              	.LFE4:
+ 625              		.align	2
+ 626              		.global	CyFxMscCheckCSW
+ 628              	CyFxMscCheckCSW:
+ 629              	.LFB5:
+ 221:../cyfxmscdrv.c **** 
+ 222:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 223:../cyfxmscdrv.c **** CyFxMscCheckCSW (
+ 224:../cyfxmscdrv.c ****         uint8_t *csw)
+ 225:../cyfxmscdrv.c **** {
+ 630              		.loc 1 225 0
+ 631              		.cfi_startproc
+ 632              		@ args = 0, pretend = 0, frame = 8
+ 633              		@ frame_needed = 1, uses_anonymous_args = 0
+ 634              		@ link register save eliminated.
+ 635 057c 04B02DE5 		str	fp, [sp, #-4]!
+ 636              	.LCFI10:
+ 637              		.cfi_def_cfa_offset 4
+ 638 0580 00B08DE2 		add	fp, sp, #0
+ 639              		.cfi_offset 11, -4
+ 640              	.LCFI11:
+ 641              		.cfi_def_cfa_register 11
+ 642 0584 0CD04DE2 		sub	sp, sp, #12
+ 643 0588 08000BE5 		str	r0, [fp, #-8]
+ 226:../cyfxmscdrv.c ****     /* Check if the CSW signature is correct. */
+ 227:../cyfxmscdrv.c ****     if ((csw[0] != 'U') || (csw[1] != 'S') ||
+ 644              		.loc 1 227 0
+ 645 058c 08301BE5 		ldr	r3, [fp, #-8]
+ 646 0590 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 647 0594 550053E3 		cmp	r3, #85
+ 648 0598 0E00001A 		bne	.L25
+ 649              		.loc 1 227 0 is_stmt 0 discriminator 1
+ 650 059c 08301BE5 		ldr	r3, [fp, #-8]
+ 651 05a0 013083E2 		add	r3, r3, #1
+ 652 05a4 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 653 05a8 530053E3 		cmp	r3, #83
+ 654 05ac 0900001A 		bne	.L25
+ 228:../cyfxmscdrv.c ****             (csw[2] != 'B') || (csw[3] != 'S'))
+ 655              		.loc 1 228 0 is_stmt 1 discriminator 1
+ 656 05b0 08301BE5 		ldr	r3, [fp, #-8]
+ 657 05b4 023083E2 		add	r3, r3, #2
+ 658 05b8 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 227:../cyfxmscdrv.c ****     if ((csw[0] != 'U') || (csw[1] != 'S') ||
+ 659              		.loc 1 227 0 discriminator 1
+ 660 05bc 420053E3 		cmp	r3, #66
+ 661 05c0 0400001A 		bne	.L25
+ 662              		.loc 1 228 0
+ 663 05c4 08301BE5 		ldr	r3, [fp, #-8]
+ 664 05c8 033083E2 		add	r3, r3, #3
+ 665 05cc 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 666 05d0 530053E3 		cmp	r3, #83
+ 667 05d4 0100000A 		beq	.L26
+ 668              	.L25:
+ 229:../cyfxmscdrv.c ****     {
+ 230:../cyfxmscdrv.c ****         return CY_U3P_ERROR_FAILURE;
+ 669              		.loc 1 230 0
+ 670 05d8 4A30A0E3 		mov	r3, #74
+ 671 05dc 070000EA 		b	.L27
+ 672              	.L26:
+ 231:../cyfxmscdrv.c ****     }
+ 232:../cyfxmscdrv.c **** 
+ 233:../cyfxmscdrv.c ****     /* Check if there is any error returned. */
+ 234:../cyfxmscdrv.c ****     if (csw[12] != 0)
+ 673              		.loc 1 234 0
+ 674 05e0 08301BE5 		ldr	r3, [fp, #-8]
+ 675 05e4 0C3083E2 		add	r3, r3, #12
+ 676 05e8 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 677 05ec 000053E3 		cmp	r3, #0
+ 678 05f0 0100000A 		beq	.L28
+ 235:../cyfxmscdrv.c ****     {
+ 236:../cyfxmscdrv.c ****         return CY_U3P_ERROR_FAILURE;
+ 679              		.loc 1 236 0
+ 680 05f4 4A30A0E3 		mov	r3, #74
+ 681 05f8 000000EA 		b	.L27
+ 682              	.L28:
+ 237:../cyfxmscdrv.c ****     }
+ 238:../cyfxmscdrv.c **** 
+ 239:../cyfxmscdrv.c ****     return CY_U3P_SUCCESS;
+ 683              		.loc 1 239 0
+ 684 05fc 0030A0E3 		mov	r3, #0
+ 685              	.L27:
+ 240:../cyfxmscdrv.c **** }
+ 686              		.loc 1 240 0
+ 687 0600 0300A0E1 		mov	r0, r3
+ 688 0604 00D08BE2 		add	sp, fp, #0
+ 689 0608 04B09DE4 		ldmfd	sp!, {fp}
+ 690 060c 1EFF2FE1 		bx	lr
+ 691              		.cfi_endproc
+ 692              	.LFE5:
+ 694              		.align	2
+ 695              		.global	CyFxMscTestUnitReady
+ 697              	CyFxMscTestUnitReady:
+ 698              	.LFB6:
+ 241:../cyfxmscdrv.c **** 
+ 242:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 243:../cyfxmscdrv.c **** CyFxMscTestUnitReady (uint8_t lun)
+ 244:../cyfxmscdrv.c **** {
+ 699              		.loc 1 244 0
+ 700              		.cfi_startproc
+ 701              		@ args = 0, pretend = 0, frame = 16
+ 702              		@ frame_needed = 1, uses_anonymous_args = 0
+ 703 0610 00482DE9 		stmfd	sp!, {fp, lr}
+ 704              	.LCFI12:
+ 705              		.cfi_def_cfa_offset 8
+ 706 0614 04B08DE2 		add	fp, sp, #4
+ 707              		.cfi_offset 14, -4
+ 708              		.cfi_offset 11, -8
+ 709              	.LCFI13:
+ 710              		.cfi_def_cfa 11, 4
+ 711 0618 18D04DE2 		sub	sp, sp, #24
+ 712 061c 0030A0E1 		mov	r3, r0
+ 713 0620 0D304BE5 		strb	r3, [fp, #-13]
+ 245:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 714              		.loc 1 245 0
+ 715 0624 0030A0E3 		mov	r3, #0
+ 716 0628 08300BE5 		str	r3, [fp, #-8]
+ 246:../cyfxmscdrv.c **** 
+ 247:../cyfxmscdrv.c ****     /* Format and send the request. */
+ 248:../cyfxmscdrv.c ****     CyFxMyFormatCBW (glMscCBW, 1, 0, CyFalse, lun, 6);
+ 717              		.loc 1 248 0
+ 718 062c 0D305BE5 		ldrb	r3, [fp, #-13]	@ zero_extendqisi2
+ 719 0630 00308DE5 		str	r3, [sp, #0]
+ 720 0634 0630A0E3 		mov	r3, #6
+ 721 0638 04308DE5 		str	r3, [sp, #4]
+ 722 063c 74009FE5 		ldr	r0, .L32
+ 723 0640 0110A0E3 		mov	r1, #1
+ 724 0644 0020A0E3 		mov	r2, #0
+ 725 0648 0030A0E3 		mov	r3, #0
+ 726 064c 6BFEFFEB 		bl	CyFxMyFormatCBW
+ 249:../cyfxmscdrv.c ****     CyFxMyFormatCmd (glMscCBW, 0, 0, 0);
+ 727              		.loc 1 249 0
+ 728 0650 60009FE5 		ldr	r0, .L32
+ 729 0654 0010A0E3 		mov	r1, #0
+ 730 0658 0020A0E3 		mov	r2, #0
+ 731 065c 0030A0E3 		mov	r3, #0
+ 732 0660 C1FEFFEB 		bl	CyFxMyFormatCmd
+ 250:../cyfxmscdrv.c ****     status = CyFxMscSendBuffer (glMscCBW, 31);
+ 733              		.loc 1 250 0
+ 734 0664 4C009FE5 		ldr	r0, .L32
+ 735 0668 1F10A0E3 		mov	r1, #31
+ 736 066c FEFFFFEB 		bl	CyFxMscSendBuffer
+ 737 0670 08000BE5 		str	r0, [fp, #-8]
+ 251:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 738              		.loc 1 251 0
+ 739 0674 08301BE5 		ldr	r3, [fp, #-8]
+ 740 0678 000053E3 		cmp	r3, #0
+ 741 067c 0300001A 		bne	.L30
+ 252:../cyfxmscdrv.c ****     {
+ 253:../cyfxmscdrv.c ****         status = CyFxMscRecvBuffer (glMscCSW, 13);
+ 742              		.loc 1 253 0
+ 743 0680 34009FE5 		ldr	r0, .L32+4
+ 744 0684 0D10A0E3 		mov	r1, #13
+ 745 0688 FEFFFFEB 		bl	CyFxMscRecvBuffer
+ 746 068c 08000BE5 		str	r0, [fp, #-8]
+ 747              	.L30:
+ 254:../cyfxmscdrv.c ****     }
+ 255:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 748              		.loc 1 255 0
+ 749 0690 08301BE5 		ldr	r3, [fp, #-8]
+ 750 0694 000053E3 		cmp	r3, #0
+ 751 0698 0200001A 		bne	.L31
+ 256:../cyfxmscdrv.c ****     {
+ 257:../cyfxmscdrv.c ****         status = CyFxMscCheckCSW (glMscCSW);
+ 752              		.loc 1 257 0
+ 753 069c 18009FE5 		ldr	r0, .L32+4
+ 754 06a0 FEFFFFEB 		bl	CyFxMscCheckCSW
+ 755 06a4 08000BE5 		str	r0, [fp, #-8]
+ 756              	.L31:
+ 258:../cyfxmscdrv.c ****     }
+ 259:../cyfxmscdrv.c **** 
+ 260:../cyfxmscdrv.c ****     return status;
+ 757              		.loc 1 260 0
+ 758 06a8 08301BE5 		ldr	r3, [fp, #-8]
+ 261:../cyfxmscdrv.c **** }
+ 759              		.loc 1 261 0
+ 760 06ac 0300A0E1 		mov	r0, r3
+ 761 06b0 04D04BE2 		sub	sp, fp, #4
+ 762 06b4 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 763              	.L33:
+ 764              		.align	2
+ 765              	.L32:
+ 766 06b8 00000000 		.word	glMscCBW
+ 767 06bc 00000000 		.word	glMscCSW
+ 768              		.cfi_endproc
+ 769              	.LFE6:
+ 771              		.align	2
+ 772              		.global	CyFxMscReadCapacity
+ 774              	CyFxMscReadCapacity:
+ 775              	.LFB7:
+ 262:../cyfxmscdrv.c **** 
+ 263:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 264:../cyfxmscdrv.c **** CyFxMscReadCapacity (uint8_t lun)
+ 265:../cyfxmscdrv.c **** {
+ 776              		.loc 1 265 0
+ 777              		.cfi_startproc
+ 778              		@ args = 0, pretend = 0, frame = 16
+ 779              		@ frame_needed = 1, uses_anonymous_args = 0
+ 780 06c0 00482DE9 		stmfd	sp!, {fp, lr}
+ 781              	.LCFI14:
+ 782              		.cfi_def_cfa_offset 8
+ 783 06c4 04B08DE2 		add	fp, sp, #4
+ 784              		.cfi_offset 14, -4
+ 785              		.cfi_offset 11, -8
+ 786              	.LCFI15:
+ 787              		.cfi_def_cfa 11, 4
+ 788 06c8 18D04DE2 		sub	sp, sp, #24
+ 789 06cc 0030A0E1 		mov	r3, r0
+ 790 06d0 0D304BE5 		strb	r3, [fp, #-13]
+ 266:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 791              		.loc 1 266 0
+ 792 06d4 0030A0E3 		mov	r3, #0
+ 793 06d8 08300BE5 		str	r3, [fp, #-8]
+ 267:../cyfxmscdrv.c **** 
+ 268:../cyfxmscdrv.c ****     /* Format and send the request. */
+ 269:../cyfxmscdrv.c ****     CyFxMyFormatCBW (glMscCBW, 1, 8, CyTrue, lun, 10);
+ 794              		.loc 1 269 0
+ 795 06dc 0D305BE5 		ldrb	r3, [fp, #-13]	@ zero_extendqisi2
+ 796 06e0 00308DE5 		str	r3, [sp, #0]
+ 797 06e4 0A30A0E3 		mov	r3, #10
+ 798 06e8 04308DE5 		str	r3, [sp, #4]
+ 799 06ec 64019FE5 		ldr	r0, .L41
+ 800 06f0 0110A0E3 		mov	r1, #1
+ 801 06f4 0820A0E3 		mov	r2, #8
+ 802 06f8 0130A0E3 		mov	r3, #1
+ 803 06fc 3FFEFFEB 		bl	CyFxMyFormatCBW
+ 270:../cyfxmscdrv.c ****     CyFxMyFormatCmd (glMscCBW, 0x25, 0, 0);
+ 804              		.loc 1 270 0
+ 805 0700 50019FE5 		ldr	r0, .L41
+ 806 0704 2510A0E3 		mov	r1, #37
+ 807 0708 0020A0E3 		mov	r2, #0
+ 808 070c 0030A0E3 		mov	r3, #0
+ 809 0710 95FEFFEB 		bl	CyFxMyFormatCmd
+ 271:../cyfxmscdrv.c ****     status = CyFxMscSendBuffer (glMscCBW, 31);
+ 810              		.loc 1 271 0
+ 811 0714 3C019FE5 		ldr	r0, .L41
+ 812 0718 1F10A0E3 		mov	r1, #31
+ 813 071c FEFFFFEB 		bl	CyFxMscSendBuffer
+ 814 0720 08000BE5 		str	r0, [fp, #-8]
+ 272:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 815              		.loc 1 272 0
+ 816 0724 08301BE5 		ldr	r3, [fp, #-8]
+ 817 0728 000053E3 		cmp	r3, #0
+ 818 072c 0300001A 		bne	.L35
+ 273:../cyfxmscdrv.c ****     {
+ 274:../cyfxmscdrv.c ****         status = CyFxMscRecvBuffer (glMscSector, 8);
+ 819              		.loc 1 274 0
+ 820 0730 24019FE5 		ldr	r0, .L41+4
+ 821 0734 0810A0E3 		mov	r1, #8
+ 822 0738 FEFFFFEB 		bl	CyFxMscRecvBuffer
+ 823 073c 08000BE5 		str	r0, [fp, #-8]
+ 824              	.L35:
+ 275:../cyfxmscdrv.c ****     }
+ 276:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 825              		.loc 1 276 0
+ 826 0740 08301BE5 		ldr	r3, [fp, #-8]
+ 827 0744 000053E3 		cmp	r3, #0
+ 828 0748 0300001A 		bne	.L36
+ 277:../cyfxmscdrv.c ****     {
+ 278:../cyfxmscdrv.c ****         status = CyFxMscRecvBuffer (glMscCSW, 13);
+ 829              		.loc 1 278 0
+ 830 074c 0C019FE5 		ldr	r0, .L41+8
+ 831 0750 0D10A0E3 		mov	r1, #13
+ 832 0754 FEFFFFEB 		bl	CyFxMscRecvBuffer
+ 833 0758 08000BE5 		str	r0, [fp, #-8]
+ 834              	.L36:
+ 279:../cyfxmscdrv.c ****     }
+ 280:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 835              		.loc 1 280 0
+ 836 075c 08301BE5 		ldr	r3, [fp, #-8]
+ 837 0760 000053E3 		cmp	r3, #0
+ 838 0764 0200001A 		bne	.L37
+ 281:../cyfxmscdrv.c ****     {
+ 282:../cyfxmscdrv.c ****         status = CyFxMscCheckCSW (glMscCSW);
+ 839              		.loc 1 282 0
+ 840 0768 F0009FE5 		ldr	r0, .L41+8
+ 841 076c FEFFFFEB 		bl	CyFxMscCheckCSW
+ 842 0770 08000BE5 		str	r0, [fp, #-8]
+ 843              	.L37:
+ 283:../cyfxmscdrv.c ****     }
+ 284:../cyfxmscdrv.c **** 
+ 285:../cyfxmscdrv.c ****     /* Decode the capacity. */
+ 286:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 844              		.loc 1 286 0
+ 845 0774 08301BE5 		ldr	r3, [fp, #-8]
+ 846 0778 000053E3 		cmp	r3, #0
+ 847 077c 1E00001A 		bne	.L38
+ 287:../cyfxmscdrv.c ****     {
+ 288:../cyfxmscdrv.c ****         glMscSectorSize = CY_U3P_MAKEWORD (glMscSector[6], glMscSector[7]);
+ 848              		.loc 1 288 0
+ 849 0780 D4309FE5 		ldr	r3, .L41+4
+ 850 0784 0630D3E5 		ldrb	r3, [r3, #6]	@ zero_extendqisi2
+ 851 0788 0334A0E1 		mov	r3, r3, asl #8
+ 852 078c 0338A0E1 		mov	r3, r3, asl #16
+ 853 0790 2328A0E1 		mov	r2, r3, lsr #16
+ 854 0794 C0309FE5 		ldr	r3, .L41+4
+ 855 0798 0730D3E5 		ldrb	r3, [r3, #7]	@ zero_extendqisi2
+ 856 079c 033082E1 		orr	r3, r2, r3
+ 857 07a0 0338A0E1 		mov	r3, r3, asl #16
+ 858 07a4 2338A0E1 		mov	r3, r3, lsr #16
+ 859 07a8 0338A0E1 		mov	r3, r3, asl #16
+ 860 07ac 2328A0E1 		mov	r2, r3, lsr #16
+ 861 07b0 AC309FE5 		ldr	r3, .L41+12
+ 862 07b4 B020C3E1 		strh	r2, [r3, #0]	@ movhi
+ 289:../cyfxmscdrv.c ****         if ((glMscSectorSize > CY_FX_MSC_MAX_SECTOR_SIZE) ||
+ 863              		.loc 1 289 0
+ 864 07b8 A4309FE5 		ldr	r3, .L41+12
+ 865 07bc B030D3E1 		ldrh	r3, [r3, #0]
+ 866 07c0 010A53E3 		cmp	r3, #4096
+ 867 07c4 0700008A 		bhi	.L39
+ 290:../cyfxmscdrv.c ****                 (glMscSector[4] != 0) || (glMscSector[5] != 0))
+ 868              		.loc 1 290 0 discriminator 1
+ 869 07c8 8C309FE5 		ldr	r3, .L41+4
+ 870 07cc 0430D3E5 		ldrb	r3, [r3, #4]	@ zero_extendqisi2
+ 289:../cyfxmscdrv.c ****         if ((glMscSectorSize > CY_FX_MSC_MAX_SECTOR_SIZE) ||
+ 871              		.loc 1 289 0 discriminator 1
+ 872 07d0 000053E3 		cmp	r3, #0
+ 873 07d4 0300001A 		bne	.L39
+ 874              		.loc 1 290 0
+ 875 07d8 7C309FE5 		ldr	r3, .L41+4
+ 876 07dc 0530D3E5 		ldrb	r3, [r3, #5]	@ zero_extendqisi2
+ 877 07e0 000053E3 		cmp	r3, #0
+ 878 07e4 0400000A 		beq	.L38
+ 879              	.L39:
+ 291:../cyfxmscdrv.c ****         {
+ 292:../cyfxmscdrv.c ****             glMscSectorSize = 0;
+ 880              		.loc 1 292 0
+ 881 07e8 74309FE5 		ldr	r3, .L41+12
+ 882 07ec 0020A0E3 		mov	r2, #0
+ 883 07f0 B020C3E1 		strh	r2, [r3, #0]	@ movhi
+ 293:../cyfxmscdrv.c ****             status = CY_U3P_ERROR_NOT_SUPPORTED;
+ 884              		.loc 1 293 0
+ 885 07f4 4630A0E3 		mov	r3, #70
+ 886 07f8 08300BE5 		str	r3, [fp, #-8]
+ 887              	.L38:
+ 294:../cyfxmscdrv.c ****         }
+ 295:../cyfxmscdrv.c ****     }
+ 296:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 888              		.loc 1 296 0
+ 889 07fc 08301BE5 		ldr	r3, [fp, #-8]
+ 890 0800 000053E3 		cmp	r3, #0
+ 891 0804 0F00001A 		bne	.L40
+ 297:../cyfxmscdrv.c ****     {
+ 298:../cyfxmscdrv.c ****         glMscCapacity = CY_U3P_MAKEDWORD (glMscSector[0], glMscSector[1],
+ 892              		.loc 1 298 0
+ 893 0808 4C309FE5 		ldr	r3, .L41+4
+ 894 080c 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 895 0810 032CA0E1 		mov	r2, r3, asl #24
+ 896 0814 40309FE5 		ldr	r3, .L41+4
+ 897 0818 0130D3E5 		ldrb	r3, [r3, #1]	@ zero_extendqisi2
+ 898 081c 0338A0E1 		mov	r3, r3, asl #16
+ 899 0820 032082E1 		orr	r2, r2, r3
+ 900 0824 30309FE5 		ldr	r3, .L41+4
+ 901 0828 0230D3E5 		ldrb	r3, [r3, #2]	@ zero_extendqisi2
+ 902 082c 0334A0E1 		mov	r3, r3, asl #8
+ 903 0830 032082E1 		orr	r2, r2, r3
+ 904 0834 20309FE5 		ldr	r3, .L41+4
+ 905 0838 0330D3E5 		ldrb	r3, [r3, #3]	@ zero_extendqisi2
+ 906 083c 032082E1 		orr	r2, r2, r3
+ 907 0840 20309FE5 		ldr	r3, .L41+16
+ 908 0844 002083E5 		str	r2, [r3, #0]
+ 909              	.L40:
+ 299:../cyfxmscdrv.c ****                 glMscSector[2], glMscSector[3]);
+ 300:../cyfxmscdrv.c ****     }
+ 301:../cyfxmscdrv.c **** 
+ 302:../cyfxmscdrv.c ****     return status;
+ 910              		.loc 1 302 0
+ 911 0848 08301BE5 		ldr	r3, [fp, #-8]
+ 303:../cyfxmscdrv.c **** }
+ 912              		.loc 1 303 0
+ 913 084c 0300A0E1 		mov	r0, r3
+ 914 0850 04D04BE2 		sub	sp, fp, #4
+ 915 0854 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 916              	.L42:
+ 917              		.align	2
+ 918              	.L41:
+ 919 0858 00000000 		.word	glMscCBW
+ 920 085c 00000000 		.word	glMscSector
+ 921 0860 00000000 		.word	glMscCSW
+ 922 0864 00000000 		.word	glMscSectorSize
+ 923 0868 00000000 		.word	glMscCapacity
+ 924              		.cfi_endproc
+ 925              	.LFE7:
+ 927              		.align	2
+ 928              		.global	CyFxMscReadSectors
+ 930              	CyFxMscReadSectors:
+ 931              	.LFB8:
+ 304:../cyfxmscdrv.c **** 
+ 305:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 306:../cyfxmscdrv.c **** CyFxMscReadSectors (
+ 307:../cyfxmscdrv.c ****         uint8_t lun,
+ 308:../cyfxmscdrv.c ****         uint32_t addr,
+ 309:../cyfxmscdrv.c ****         uint16_t count,
+ 310:../cyfxmscdrv.c ****         uint8_t *buffer)
+ 311:../cyfxmscdrv.c **** {
+ 932              		.loc 1 311 0
+ 933              		.cfi_startproc
+ 934              		@ args = 0, pretend = 0, frame = 24
+ 935              		@ frame_needed = 1, uses_anonymous_args = 0
+ 936 086c 00482DE9 		stmfd	sp!, {fp, lr}
+ 937              	.LCFI16:
+ 938              		.cfi_def_cfa_offset 8
+ 939 0870 04B08DE2 		add	fp, sp, #4
+ 940              		.cfi_offset 14, -4
+ 941              		.cfi_offset 11, -8
+ 942              	.LCFI17:
+ 943              		.cfi_def_cfa 11, 4
+ 944 0874 20D04DE2 		sub	sp, sp, #32
+ 945 0878 14100BE5 		str	r1, [fp, #-20]
+ 946 087c 1C300BE5 		str	r3, [fp, #-28]
+ 947 0880 0030A0E1 		mov	r3, r0
+ 948 0884 0D304BE5 		strb	r3, [fp, #-13]
+ 949 0888 B6214BE1 		strh	r2, [fp, #-22]	@ movhi
+ 312:../cyfxmscdrv.c ****     uint16_t size = count * glMscSectorSize;
+ 950              		.loc 1 312 0
+ 951 088c E8309FE5 		ldr	r3, .L49
+ 952 0890 B030D3E1 		ldrh	r3, [r3, #0]
+ 953 0894 B6215BE1 		ldrh	r2, [fp, #-22]	@ movhi
+ 954 0898 920303E0 		mul	r3, r2, r3
+ 955 089c BA304BE1 		strh	r3, [fp, #-10]	@ movhi
+ 313:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 956              		.loc 1 313 0
+ 957 08a0 0030A0E3 		mov	r3, #0
+ 958 08a4 08300BE5 		str	r3, [fp, #-8]
+ 314:../cyfxmscdrv.c **** 
+ 315:../cyfxmscdrv.c ****     if ((count * glMscSectorSize) > (uint16_t)0xFFFF)
+ 959              		.loc 1 315 0
+ 960 08a8 B6315BE1 		ldrh	r3, [fp, #-22]
+ 961 08ac C8209FE5 		ldr	r2, .L49
+ 962 08b0 B020D2E1 		ldrh	r2, [r2, #0]
+ 963 08b4 930202E0 		mul	r2, r3, r2
+ 964 08b8 C0309FE5 		ldr	r3, .L49+4
+ 965 08bc 030052E1 		cmp	r2, r3
+ 966 08c0 010000DA 		ble	.L44
+ 316:../cyfxmscdrv.c ****     {
+ 317:../cyfxmscdrv.c ****         return CY_U3P_ERROR_BAD_ARGUMENT;
+ 967              		.loc 1 317 0
+ 968 08c4 4030A0E3 		mov	r3, #64
+ 969 08c8 280000EA 		b	.L45
+ 970              	.L44:
+ 318:../cyfxmscdrv.c ****     }
+ 319:../cyfxmscdrv.c **** 
+ 320:../cyfxmscdrv.c ****     /* Format and send the request. */
+ 321:../cyfxmscdrv.c ****     CyFxMyFormatCBW (glMscCBW, 1, size, CyTrue, lun, 10);
+ 971              		.loc 1 321 0
+ 972 08cc BA305BE1 		ldrh	r3, [fp, #-10]
+ 973 08d0 0D205BE5 		ldrb	r2, [fp, #-13]	@ zero_extendqisi2
+ 974 08d4 00208DE5 		str	r2, [sp, #0]
+ 975 08d8 0A20A0E3 		mov	r2, #10
+ 976 08dc 04208DE5 		str	r2, [sp, #4]
+ 977 08e0 9C009FE5 		ldr	r0, .L49+8
+ 978 08e4 0110A0E3 		mov	r1, #1
+ 979 08e8 0320A0E1 		mov	r2, r3
+ 980 08ec 0130A0E3 		mov	r3, #1
+ 981 08f0 C2FDFFEB 		bl	CyFxMyFormatCBW
+ 322:../cyfxmscdrv.c ****     CyFxMyFormatCmd (glMscCBW, 0x28, addr, count);
+ 982              		.loc 1 322 0
+ 983 08f4 B6315BE1 		ldrh	r3, [fp, #-22]
+ 984 08f8 84009FE5 		ldr	r0, .L49+8
+ 985 08fc 2810A0E3 		mov	r1, #40
+ 986 0900 14201BE5 		ldr	r2, [fp, #-20]
+ 987 0904 18FEFFEB 		bl	CyFxMyFormatCmd
+ 323:../cyfxmscdrv.c ****     status = CyFxMscSendBuffer (glMscCBW, 31);
+ 988              		.loc 1 323 0
+ 989 0908 74009FE5 		ldr	r0, .L49+8
+ 990 090c 1F10A0E3 		mov	r1, #31
+ 991 0910 FEFFFFEB 		bl	CyFxMscSendBuffer
+ 992 0914 08000BE5 		str	r0, [fp, #-8]
+ 324:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 993              		.loc 1 324 0
+ 994 0918 08301BE5 		ldr	r3, [fp, #-8]
+ 995 091c 000053E3 		cmp	r3, #0
+ 996 0920 0400001A 		bne	.L46
+ 325:../cyfxmscdrv.c ****     {
+ 326:../cyfxmscdrv.c ****         status = CyFxMscRecvBuffer (buffer, size);
+ 997              		.loc 1 326 0
+ 998 0924 BA305BE1 		ldrh	r3, [fp, #-10]
+ 999 0928 1C001BE5 		ldr	r0, [fp, #-28]
+ 1000 092c 0310A0E1 		mov	r1, r3
+ 1001 0930 FEFFFFEB 		bl	CyFxMscRecvBuffer
+ 1002 0934 08000BE5 		str	r0, [fp, #-8]
+ 1003              	.L46:
+ 327:../cyfxmscdrv.c ****     }
+ 328:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 1004              		.loc 1 328 0
+ 1005 0938 08301BE5 		ldr	r3, [fp, #-8]
+ 1006 093c 000053E3 		cmp	r3, #0
+ 1007 0940 0300001A 		bne	.L47
+ 329:../cyfxmscdrv.c ****     {
+ 330:../cyfxmscdrv.c ****         status = CyFxMscRecvBuffer (glMscCSW, 13);
+ 1008              		.loc 1 330 0
+ 1009 0944 3C009FE5 		ldr	r0, .L49+12
+ 1010 0948 0D10A0E3 		mov	r1, #13
+ 1011 094c FEFFFFEB 		bl	CyFxMscRecvBuffer
+ 1012 0950 08000BE5 		str	r0, [fp, #-8]
+ 1013              	.L47:
+ 331:../cyfxmscdrv.c ****     }
+ 332:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 1014              		.loc 1 332 0
+ 1015 0954 08301BE5 		ldr	r3, [fp, #-8]
+ 1016 0958 000053E3 		cmp	r3, #0
+ 1017 095c 0200001A 		bne	.L48
+ 333:../cyfxmscdrv.c ****     {
+ 334:../cyfxmscdrv.c ****         status = CyFxMscCheckCSW (glMscCSW);
+ 1018              		.loc 1 334 0
+ 1019 0960 20009FE5 		ldr	r0, .L49+12
+ 1020 0964 FEFFFFEB 		bl	CyFxMscCheckCSW
+ 1021 0968 08000BE5 		str	r0, [fp, #-8]
+ 1022              	.L48:
+ 335:../cyfxmscdrv.c ****     }
+ 336:../cyfxmscdrv.c **** 
+ 337:../cyfxmscdrv.c ****     return status;
+ 1023              		.loc 1 337 0
+ 1024 096c 08301BE5 		ldr	r3, [fp, #-8]
+ 1025              	.L45:
+ 338:../cyfxmscdrv.c **** }
+ 1026              		.loc 1 338 0
+ 1027 0970 0300A0E1 		mov	r0, r3
+ 1028 0974 04D04BE2 		sub	sp, fp, #4
+ 1029 0978 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1030              	.L50:
+ 1031              		.align	2
+ 1032              	.L49:
+ 1033 097c 00000000 		.word	glMscSectorSize
+ 1034 0980 FFFF0000 		.word	65535
+ 1035 0984 00000000 		.word	glMscCBW
+ 1036 0988 00000000 		.word	glMscCSW
+ 1037              		.cfi_endproc
+ 1038              	.LFE8:
+ 1040              		.align	2
+ 1041              		.global	CyFxMscWriteSectors
+ 1043              	CyFxMscWriteSectors:
+ 1044              	.LFB9:
+ 339:../cyfxmscdrv.c **** 
+ 340:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 341:../cyfxmscdrv.c **** CyFxMscWriteSectors (
+ 342:../cyfxmscdrv.c ****         uint8_t lun,
+ 343:../cyfxmscdrv.c ****         uint32_t addr,
+ 344:../cyfxmscdrv.c ****         uint16_t count,
+ 345:../cyfxmscdrv.c ****         uint8_t *buffer)
+ 346:../cyfxmscdrv.c **** {
+ 1045              		.loc 1 346 0
+ 1046              		.cfi_startproc
+ 1047              		@ args = 0, pretend = 0, frame = 24
+ 1048              		@ frame_needed = 1, uses_anonymous_args = 0
+ 1049 098c 00482DE9 		stmfd	sp!, {fp, lr}
+ 1050              	.LCFI18:
+ 1051              		.cfi_def_cfa_offset 8
+ 1052 0990 04B08DE2 		add	fp, sp, #4
+ 1053              		.cfi_offset 14, -4
+ 1054              		.cfi_offset 11, -8
+ 1055              	.LCFI19:
+ 1056              		.cfi_def_cfa 11, 4
+ 1057 0994 20D04DE2 		sub	sp, sp, #32
+ 1058 0998 14100BE5 		str	r1, [fp, #-20]
+ 1059 099c 1C300BE5 		str	r3, [fp, #-28]
+ 1060 09a0 0030A0E1 		mov	r3, r0
+ 1061 09a4 0D304BE5 		strb	r3, [fp, #-13]
+ 1062 09a8 B6214BE1 		strh	r2, [fp, #-22]	@ movhi
+ 347:../cyfxmscdrv.c ****     uint16_t size = count * glMscSectorSize;
+ 1063              		.loc 1 347 0
+ 1064 09ac E8309FE5 		ldr	r3, .L57
+ 1065 09b0 B030D3E1 		ldrh	r3, [r3, #0]
+ 1066 09b4 B6215BE1 		ldrh	r2, [fp, #-22]	@ movhi
+ 1067 09b8 920303E0 		mul	r3, r2, r3
+ 1068 09bc BA304BE1 		strh	r3, [fp, #-10]	@ movhi
+ 348:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 1069              		.loc 1 348 0
+ 1070 09c0 0030A0E3 		mov	r3, #0
+ 1071 09c4 08300BE5 		str	r3, [fp, #-8]
+ 349:../cyfxmscdrv.c **** 
+ 350:../cyfxmscdrv.c ****     if ((count * glMscSectorSize) > (uint16_t)0xFFFF)
+ 1072              		.loc 1 350 0
+ 1073 09c8 B6315BE1 		ldrh	r3, [fp, #-22]
+ 1074 09cc C8209FE5 		ldr	r2, .L57
+ 1075 09d0 B020D2E1 		ldrh	r2, [r2, #0]
+ 1076 09d4 930202E0 		mul	r2, r3, r2
+ 1077 09d8 C0309FE5 		ldr	r3, .L57+4
+ 1078 09dc 030052E1 		cmp	r2, r3
+ 1079 09e0 010000DA 		ble	.L52
+ 351:../cyfxmscdrv.c ****     {
+ 352:../cyfxmscdrv.c ****         return CY_U3P_ERROR_BAD_ARGUMENT;
+ 1080              		.loc 1 352 0
+ 1081 09e4 4030A0E3 		mov	r3, #64
+ 1082 09e8 280000EA 		b	.L53
+ 1083              	.L52:
+ 353:../cyfxmscdrv.c ****     }
+ 354:../cyfxmscdrv.c **** 
+ 355:../cyfxmscdrv.c ****     /* Format and send the request. */
+ 356:../cyfxmscdrv.c ****     CyFxMyFormatCBW (glMscCBW, 1, size, CyFalse, lun, 10);
+ 1084              		.loc 1 356 0
+ 1085 09ec BA305BE1 		ldrh	r3, [fp, #-10]
+ 1086 09f0 0D205BE5 		ldrb	r2, [fp, #-13]	@ zero_extendqisi2
+ 1087 09f4 00208DE5 		str	r2, [sp, #0]
+ 1088 09f8 0A20A0E3 		mov	r2, #10
+ 1089 09fc 04208DE5 		str	r2, [sp, #4]
+ 1090 0a00 9C009FE5 		ldr	r0, .L57+8
+ 1091 0a04 0110A0E3 		mov	r1, #1
+ 1092 0a08 0320A0E1 		mov	r2, r3
+ 1093 0a0c 0030A0E3 		mov	r3, #0
+ 1094 0a10 7AFDFFEB 		bl	CyFxMyFormatCBW
+ 357:../cyfxmscdrv.c ****     CyFxMyFormatCmd (glMscCBW, 0x2A, addr, count);
+ 1095              		.loc 1 357 0
+ 1096 0a14 B6315BE1 		ldrh	r3, [fp, #-22]
+ 1097 0a18 84009FE5 		ldr	r0, .L57+8
+ 1098 0a1c 2A10A0E3 		mov	r1, #42
+ 1099 0a20 14201BE5 		ldr	r2, [fp, #-20]
+ 1100 0a24 D0FDFFEB 		bl	CyFxMyFormatCmd
+ 358:../cyfxmscdrv.c ****     status = CyFxMscSendBuffer (glMscCBW, 31);
+ 1101              		.loc 1 358 0
+ 1102 0a28 74009FE5 		ldr	r0, .L57+8
+ 1103 0a2c 1F10A0E3 		mov	r1, #31
+ 1104 0a30 FEFFFFEB 		bl	CyFxMscSendBuffer
+ 1105 0a34 08000BE5 		str	r0, [fp, #-8]
+ 359:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 1106              		.loc 1 359 0
+ 1107 0a38 08301BE5 		ldr	r3, [fp, #-8]
+ 1108 0a3c 000053E3 		cmp	r3, #0
+ 1109 0a40 0400001A 		bne	.L54
+ 360:../cyfxmscdrv.c ****     {
+ 361:../cyfxmscdrv.c ****         status = CyFxMscSendBuffer (buffer, size);
+ 1110              		.loc 1 361 0
+ 1111 0a44 BA305BE1 		ldrh	r3, [fp, #-10]
+ 1112 0a48 1C001BE5 		ldr	r0, [fp, #-28]
+ 1113 0a4c 0310A0E1 		mov	r1, r3
+ 1114 0a50 FEFFFFEB 		bl	CyFxMscSendBuffer
+ 1115 0a54 08000BE5 		str	r0, [fp, #-8]
+ 1116              	.L54:
+ 362:../cyfxmscdrv.c ****     }
+ 363:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 1117              		.loc 1 363 0
+ 1118 0a58 08301BE5 		ldr	r3, [fp, #-8]
+ 1119 0a5c 000053E3 		cmp	r3, #0
+ 1120 0a60 0300001A 		bne	.L55
+ 364:../cyfxmscdrv.c ****     {
+ 365:../cyfxmscdrv.c ****         status = CyFxMscRecvBuffer (glMscCSW, 13);
+ 1121              		.loc 1 365 0
+ 1122 0a64 3C009FE5 		ldr	r0, .L57+12
+ 1123 0a68 0D10A0E3 		mov	r1, #13
+ 1124 0a6c FEFFFFEB 		bl	CyFxMscRecvBuffer
+ 1125 0a70 08000BE5 		str	r0, [fp, #-8]
+ 1126              	.L55:
+ 366:../cyfxmscdrv.c ****     }
+ 367:../cyfxmscdrv.c ****     if (status == CY_U3P_SUCCESS)
+ 1127              		.loc 1 367 0
+ 1128 0a74 08301BE5 		ldr	r3, [fp, #-8]
+ 1129 0a78 000053E3 		cmp	r3, #0
+ 1130 0a7c 0200001A 		bne	.L56
+ 368:../cyfxmscdrv.c ****     {
+ 369:../cyfxmscdrv.c ****         status = CyFxMscCheckCSW (glMscCSW);
+ 1131              		.loc 1 369 0
+ 1132 0a80 20009FE5 		ldr	r0, .L57+12
+ 1133 0a84 FEFFFFEB 		bl	CyFxMscCheckCSW
+ 1134 0a88 08000BE5 		str	r0, [fp, #-8]
+ 1135              	.L56:
+ 370:../cyfxmscdrv.c ****     }
+ 371:../cyfxmscdrv.c **** 
+ 372:../cyfxmscdrv.c ****     return status;
+ 1136              		.loc 1 372 0
+ 1137 0a8c 08301BE5 		ldr	r3, [fp, #-8]
+ 1138              	.L53:
+ 373:../cyfxmscdrv.c **** }
+ 1139              		.loc 1 373 0
+ 1140 0a90 0300A0E1 		mov	r0, r3
+ 1141 0a94 04D04BE2 		sub	sp, fp, #4
+ 1142 0a98 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1143              	.L58:
+ 1144              		.align	2
+ 1145              	.L57:
+ 1146 0a9c 00000000 		.word	glMscSectorSize
+ 1147 0aa0 FFFF0000 		.word	65535
+ 1148 0aa4 00000000 		.word	glMscCBW
+ 1149 0aa8 00000000 		.word	glMscCSW
+ 1150              		.cfi_endproc
+ 1151              	.LFE9:
+ 1153              		.align	2
+ 1154              		.global	CyFxMscDriverInit
+ 1156              	CyFxMscDriverInit:
+ 1157              	.LFB10:
+ 374:../cyfxmscdrv.c **** 
+ 375:../cyfxmscdrv.c **** CyU3PReturnStatus_t
+ 376:../cyfxmscdrv.c **** CyFxMscDriverInit ()
+ 377:../cyfxmscdrv.c **** {
+ 1158              		.loc 1 377 0
+ 1159              		.cfi_startproc
+ 1160              		@ args = 0, pretend = 0, frame = 56
+ 1161              		@ frame_needed = 1, uses_anonymous_args = 0
+ 1162 0aac 00482DE9 		stmfd	sp!, {fp, lr}
+ 1163              	.LCFI20:
+ 1164              		.cfi_def_cfa_offset 8
+ 1165 0ab0 04B08DE2 		add	fp, sp, #4
+ 1166              		.cfi_offset 14, -4
+ 1167              		.cfi_offset 11, -8
+ 1168              	.LCFI21:
+ 1169              		.cfi_def_cfa 11, 4
+ 1170 0ab4 40D04DE2 		sub	sp, sp, #64
+ 378:../cyfxmscdrv.c ****     uint8_t maxLun = 0, i, retry;
+ 1171              		.loc 1 378 0
+ 1172 0ab8 0030A0E3 		mov	r3, #0
+ 1173 0abc 0D304BE5 		strb	r3, [fp, #-13]
+ 379:../cyfxmscdrv.c ****     uint16_t length, size, offset;
+ 380:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status;
+ 381:../cyfxmscdrv.c ****     CyU3PUsbHostEpConfig_t epCfg;
+ 382:../cyfxmscdrv.c ****     CyU3PDmaChannelConfig_t dmaCfg;
+ 383:../cyfxmscdrv.c **** 
+ 384:../cyfxmscdrv.c ****     /* Read first four bytes of configuration descriptor to determine
+ 385:../cyfxmscdrv.c ****      * the total length. */
+ 386:../cyfxmscdrv.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 1174              		.loc 1 386 0
+ 1175 0ac0 0430A0E3 		mov	r3, #4
+ 1176 0ac4 00308DE5 		str	r3, [sp, #0]
+ 1177 0ac8 B8359FE5 		ldr	r3, .L101
+ 1178 0acc 04308DE5 		str	r3, [sp, #4]
+ 1179 0ad0 8000A0E3 		mov	r0, #128
+ 1180 0ad4 0610A0E3 		mov	r1, #6
+ 1181 0ad8 022CA0E3 		mov	r2, #512
+ 1182 0adc 0030A0E3 		mov	r3, #0
+ 1183 0ae0 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 1184 0ae4 0C000BE5 		str	r0, [fp, #-12]
+ 387:../cyfxmscdrv.c ****             (CY_U3P_USB_CONFIG_DESCR << 8), 0, 4, glEp0Buffer);
+ 388:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1185              		.loc 1 388 0
+ 1186 0ae8 0C301BE5 		ldr	r3, [fp, #-12]
+ 1187 0aec 000053E3 		cmp	r3, #0
+ 1188 0af0 5101001A 		bne	.L89
+ 1189              	.L60:
+ 389:../cyfxmscdrv.c ****     {
+ 390:../cyfxmscdrv.c ****         goto enum_error;
+ 391:../cyfxmscdrv.c ****     }
+ 392:../cyfxmscdrv.c **** 
+ 393:../cyfxmscdrv.c ****     /* Identify the length of the data received. */
+ 394:../cyfxmscdrv.c ****     length = CY_U3P_MAKEWORD(glEp0Buffer[3], glEp0Buffer[2]);
+ 1190              		.loc 1 394 0
+ 1191 0af4 8C359FE5 		ldr	r3, .L101
+ 1192 0af8 0330D3E5 		ldrb	r3, [r3, #3]	@ zero_extendqisi2
+ 1193 0afc 0334A0E1 		mov	r3, r3, asl #8
+ 1194 0b00 0338A0E1 		mov	r3, r3, asl #16
+ 1195 0b04 2328A0E1 		mov	r2, r3, lsr #16
+ 1196 0b08 78359FE5 		ldr	r3, .L101
+ 1197 0b0c 0230D3E5 		ldrb	r3, [r3, #2]	@ zero_extendqisi2
+ 1198 0b10 033082E1 		orr	r3, r2, r3
+ 1199 0b14 0338A0E1 		mov	r3, r3, asl #16
+ 1200 0b18 2338A0E1 		mov	r3, r3, lsr #16
+ 1201 0b1c B0314BE1 		strh	r3, [fp, #-16]	@ movhi
+ 395:../cyfxmscdrv.c ****     if (length > CY_FX_HOST_EP0_BUFFER_SIZE)
+ 1202              		.loc 1 395 0
+ 1203 0b20 B0315BE1 		ldrh	r3, [fp, #-16]
+ 1204 0b24 020C53E3 		cmp	r3, #512
+ 1205 0b28 4501008A 		bhi	.L90
+ 1206              	.L62:
+ 396:../cyfxmscdrv.c ****     {
+ 397:../cyfxmscdrv.c ****         goto enum_error;
+ 398:../cyfxmscdrv.c ****     }
+ 399:../cyfxmscdrv.c **** 
+ 400:../cyfxmscdrv.c ****     /* Read the full configuration descriptor. */
+ 401:../cyfxmscdrv.c ****     status = CyFxSendSetupRqt (0x80, CY_U3P_USB_SC_GET_DESCRIPTOR,
+ 1207              		.loc 1 401 0
+ 1208 0b2c B0315BE1 		ldrh	r3, [fp, #-16]
+ 1209 0b30 00308DE5 		str	r3, [sp, #0]
+ 1210 0b34 4C359FE5 		ldr	r3, .L101
+ 1211 0b38 04308DE5 		str	r3, [sp, #4]
+ 1212 0b3c 8000A0E3 		mov	r0, #128
+ 1213 0b40 0610A0E3 		mov	r1, #6
+ 1214 0b44 022CA0E3 		mov	r2, #512
+ 1215 0b48 0030A0E3 		mov	r3, #0
+ 1216 0b4c FEFFFFEB 		bl	CyFxSendSetupRqt
+ 1217 0b50 0C000BE5 		str	r0, [fp, #-12]
+ 402:../cyfxmscdrv.c ****             (CY_U3P_USB_CONFIG_DESCR << 8), 0, length, glEp0Buffer);
+ 403:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1218              		.loc 1 403 0
+ 1219 0b54 0C301BE5 		ldr	r3, [fp, #-12]
+ 1220 0b58 000053E3 		cmp	r3, #0
+ 1221 0b5c 3A01001A 		bne	.L91
+ 1222              	.L63:
+ 404:../cyfxmscdrv.c ****     {
+ 405:../cyfxmscdrv.c ****         goto enum_error;
+ 406:../cyfxmscdrv.c ****     }
+ 407:../cyfxmscdrv.c **** 
+ 408:../cyfxmscdrv.c ****     /* Identify the EP characteristics. */
+ 409:../cyfxmscdrv.c ****     offset = 0;
+ 1223              		.loc 1 409 0
+ 1224 0b60 0030A0E3 		mov	r3, #0
+ 1225 0b64 B8304BE1 		strh	r3, [fp, #-8]	@ movhi
+ 410:../cyfxmscdrv.c ****     while (offset < length)
+ 1226              		.loc 1 410 0
+ 1227 0b68 3A0000EA 		b	.L64
+ 1228              	.L68:
+ 411:../cyfxmscdrv.c ****     {
+ 412:../cyfxmscdrv.c ****         if (glEp0Buffer[offset + 1] == CY_U3P_USB_ENDPNT_DESCR)
+ 1229              		.loc 1 412 0
+ 1230 0b6c B8305BE1 		ldrh	r3, [fp, #-8]
+ 1231 0b70 013083E2 		add	r3, r3, #1
+ 1232 0b74 0C259FE5 		ldr	r2, .L101
+ 1233 0b78 0330D2E7 		ldrb	r3, [r2, r3]	@ zero_extendqisi2
+ 1234 0b7c 050053E3 		cmp	r3, #5
+ 1235 0b80 2D00001A 		bne	.L65
+ 413:../cyfxmscdrv.c ****         {
+ 414:../cyfxmscdrv.c ****             if (glEp0Buffer[offset + 3] != CY_U3P_USB_EP_BULK)
+ 1236              		.loc 1 414 0
+ 1237 0b84 B8305BE1 		ldrh	r3, [fp, #-8]
+ 1238 0b88 033083E2 		add	r3, r3, #3
+ 1239 0b8c F4249FE5 		ldr	r2, .L101
+ 1240 0b90 0330D2E7 		ldrb	r3, [r2, r3]	@ zero_extendqisi2
+ 1241 0b94 020053E3 		cmp	r3, #2
+ 1242 0b98 2D01001A 		bne	.L92
+ 1243              	.L66:
+ 415:../cyfxmscdrv.c ****             {
+ 416:../cyfxmscdrv.c ****                 goto enum_error;
+ 417:../cyfxmscdrv.c ****             }
+ 418:../cyfxmscdrv.c **** 
+ 419:../cyfxmscdrv.c ****             /* Retreive the information. */
+ 420:../cyfxmscdrv.c ****             glMscEpSize = CY_U3P_MAKEWORD(glEp0Buffer[offset + 5],
+ 1244              		.loc 1 420 0
+ 1245 0b9c B8305BE1 		ldrh	r3, [fp, #-8]
+ 1246 0ba0 053083E2 		add	r3, r3, #5
+ 1247 0ba4 DC249FE5 		ldr	r2, .L101
+ 1248 0ba8 0330D2E7 		ldrb	r3, [r2, r3]	@ zero_extendqisi2
+ 1249 0bac 0334A0E1 		mov	r3, r3, asl #8
+ 1250 0bb0 0338A0E1 		mov	r3, r3, asl #16
+ 1251 0bb4 2328A0E1 		mov	r2, r3, lsr #16
+ 1252 0bb8 B8305BE1 		ldrh	r3, [fp, #-8]
+ 1253 0bbc 043083E2 		add	r3, r3, #4
+ 1254 0bc0 C0149FE5 		ldr	r1, .L101
+ 1255 0bc4 0330D1E7 		ldrb	r3, [r1, r3]	@ zero_extendqisi2
+ 1256 0bc8 033082E1 		orr	r3, r2, r3
+ 1257 0bcc 0338A0E1 		mov	r3, r3, asl #16
+ 1258 0bd0 2338A0E1 		mov	r3, r3, lsr #16
+ 1259 0bd4 0338A0E1 		mov	r3, r3, asl #16
+ 1260 0bd8 2328A0E1 		mov	r2, r3, lsr #16
+ 1261 0bdc A8349FE5 		ldr	r3, .L101+4
+ 1262 0be0 B020C3E1 		strh	r2, [r3, #0]	@ movhi
+ 421:../cyfxmscdrv.c ****                     glEp0Buffer[offset + 4]);
+ 422:../cyfxmscdrv.c ****             if (glEp0Buffer[offset + 2] & 0x80)
+ 1263              		.loc 1 422 0
+ 1264 0be4 B8305BE1 		ldrh	r3, [fp, #-8]
+ 1265 0be8 023083E2 		add	r3, r3, #2
+ 1266 0bec 94249FE5 		ldr	r2, .L101
+ 1267 0bf0 0330D2E7 		ldrb	r3, [r2, r3]	@ zero_extendqisi2
+ 1268 0bf4 FF3003E2 		and	r3, r3, #255
+ 1269 0bf8 033CA0E1 		mov	r3, r3, asl #24
+ 1270 0bfc 433CA0E1 		mov	r3, r3, asr #24
+ 1271 0c00 000053E3 		cmp	r3, #0
+ 1272 0c04 060000AA 		bge	.L67
+ 423:../cyfxmscdrv.c ****             {
+ 424:../cyfxmscdrv.c ****                 glMscInEp = glEp0Buffer[offset + 2];
+ 1273              		.loc 1 424 0
+ 1274 0c08 B8305BE1 		ldrh	r3, [fp, #-8]
+ 1275 0c0c 023083E2 		add	r3, r3, #2
+ 1276 0c10 70249FE5 		ldr	r2, .L101
+ 1277 0c14 0320D2E7 		ldrb	r2, [r2, r3]	@ zero_extendqisi2
+ 1278 0c18 70349FE5 		ldr	r3, .L101+8
+ 1279 0c1c 0020C3E5 		strb	r2, [r3, #0]
+ 1280 0c20 050000EA 		b	.L65
+ 1281              	.L67:
+ 425:../cyfxmscdrv.c ****             }
+ 426:../cyfxmscdrv.c ****             else
+ 427:../cyfxmscdrv.c ****             {
+ 428:../cyfxmscdrv.c ****                 glMscOutEp = glEp0Buffer[offset + 2];
+ 1282              		.loc 1 428 0
+ 1283 0c24 B8305BE1 		ldrh	r3, [fp, #-8]
+ 1284 0c28 023083E2 		add	r3, r3, #2
+ 1285 0c2c 54249FE5 		ldr	r2, .L101
+ 1286 0c30 0320D2E7 		ldrb	r2, [r2, r3]	@ zero_extendqisi2
+ 1287 0c34 58349FE5 		ldr	r3, .L101+12
+ 1288 0c38 0020C3E5 		strb	r2, [r3, #0]
+ 1289              	.L65:
+ 429:../cyfxmscdrv.c ****             }
+ 430:../cyfxmscdrv.c ****         }
+ 431:../cyfxmscdrv.c **** 
+ 432:../cyfxmscdrv.c ****         /* Advance to next descriptor. */
+ 433:../cyfxmscdrv.c ****         offset += glEp0Buffer[offset];
+ 1290              		.loc 1 433 0
+ 1291 0c3c B8305BE1 		ldrh	r3, [fp, #-8]
+ 1292 0c40 40249FE5 		ldr	r2, .L101
+ 1293 0c44 0330D2E7 		ldrb	r3, [r2, r3]	@ zero_extendqisi2
+ 1294 0c48 0320A0E1 		mov	r2, r3
+ 1295 0c4c B8305BE1 		ldrh	r3, [fp, #-8]	@ movhi
+ 1296 0c50 033082E0 		add	r3, r2, r3
+ 1297 0c54 B8304BE1 		strh	r3, [fp, #-8]	@ movhi
+ 1298              	.L64:
+ 410:../cyfxmscdrv.c ****     while (offset < length)
+ 1299              		.loc 1 410 0 discriminator 1
+ 1300 0c58 B8205BE1 		ldrh	r2, [fp, #-8]
+ 1301 0c5c B0315BE1 		ldrh	r3, [fp, #-16]
+ 1302 0c60 030052E1 		cmp	r2, r3
+ 1303 0c64 C0FFFF3A 		bcc	.L68
+ 434:../cyfxmscdrv.c ****     }
+ 435:../cyfxmscdrv.c **** 
+ 436:../cyfxmscdrv.c ****     /* Set the new configuration. */
+ 437:../cyfxmscdrv.c ****     status = CyFxSendSetupRqt (0x00, CY_U3P_USB_SC_SET_CONFIGURATION,
+ 1304              		.loc 1 437 0
+ 1305 0c68 0030A0E3 		mov	r3, #0
+ 1306 0c6c 00308DE5 		str	r3, [sp, #0]
+ 1307 0c70 10349FE5 		ldr	r3, .L101
+ 1308 0c74 04308DE5 		str	r3, [sp, #4]
+ 1309 0c78 0000A0E3 		mov	r0, #0
+ 1310 0c7c 0910A0E3 		mov	r1, #9
+ 1311 0c80 0120A0E3 		mov	r2, #1
+ 1312 0c84 0030A0E3 		mov	r3, #0
+ 1313 0c88 FEFFFFEB 		bl	CyFxSendSetupRqt
+ 1314 0c8c 0C000BE5 		str	r0, [fp, #-12]
+ 438:../cyfxmscdrv.c ****             1, 0, 0, glEp0Buffer);
+ 439:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1315              		.loc 1 439 0
+ 1316 0c90 0C301BE5 		ldr	r3, [fp, #-12]
+ 1317 0c94 000053E3 		cmp	r3, #0
+ 1318 0c98 EF00001A 		bne	.L93
+ 1319              	.L69:
+ 440:../cyfxmscdrv.c ****     {
+ 441:../cyfxmscdrv.c ****         goto enum_error;
+ 442:../cyfxmscdrv.c ****     }
+ 443:../cyfxmscdrv.c **** 
+ 444:../cyfxmscdrv.c ****     /* Identify the number of LUNs available.
+ 445:../cyfxmscdrv.c ****      * We will use only the first available LUN. */
+ 446:../cyfxmscdrv.c ****     status = CyFxSendSetupRqt (0xA1, CY_FX_MSC_GET_MAX_LUN,
+ 1320              		.loc 1 446 0
+ 1321 0c9c 0130A0E3 		mov	r3, #1
+ 1322 0ca0 00308DE5 		str	r3, [sp, #0]
+ 1323 0ca4 DC339FE5 		ldr	r3, .L101
+ 1324 0ca8 04308DE5 		str	r3, [sp, #4]
+ 1325 0cac A100A0E3 		mov	r0, #161
+ 1326 0cb0 FE10A0E3 		mov	r1, #254
+ 1327 0cb4 0020A0E3 		mov	r2, #0
+ 1328 0cb8 0030A0E3 		mov	r3, #0
+ 1329 0cbc FEFFFFEB 		bl	CyFxSendSetupRqt
+ 1330 0cc0 0C000BE5 		str	r0, [fp, #-12]
+ 447:../cyfxmscdrv.c ****             0, 0, 1, glEp0Buffer);
+ 448:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1331              		.loc 1 448 0
+ 1332 0cc4 0C301BE5 		ldr	r3, [fp, #-12]
+ 1333 0cc8 000053E3 		cmp	r3, #0
+ 1334 0ccc E400001A 		bne	.L94
+ 1335              	.L70:
+ 449:../cyfxmscdrv.c ****     {
+ 450:../cyfxmscdrv.c ****         goto enum_error;
+ 451:../cyfxmscdrv.c ****     }
+ 452:../cyfxmscdrv.c ****     maxLun = glEp0Buffer[0];
+ 1336              		.loc 1 452 0
+ 1337 0cd0 B0339FE5 		ldr	r3, .L101
+ 1338 0cd4 0030D3E5 		ldrb	r3, [r3, #0]
+ 1339 0cd8 0D304BE5 		strb	r3, [fp, #-13]
+ 453:../cyfxmscdrv.c **** 
+ 454:../cyfxmscdrv.c ****     /* Add the IN endpoint. */
+ 455:../cyfxmscdrv.c ****     CyU3PMemSet ((uint8_t *)&epCfg, 0, sizeof(epCfg));
+ 1340              		.loc 1 455 0
+ 1341 0cdc 20304BE2 		sub	r3, fp, #32
+ 1342 0ce0 0300A0E1 		mov	r0, r3
+ 1343 0ce4 0010A0E3 		mov	r1, #0
+ 1344 0ce8 0C20A0E3 		mov	r2, #12
+ 1345 0cec FEFFFFEB 		bl	CyU3PMemSet
+ 456:../cyfxmscdrv.c ****     epCfg.type = CY_U3P_USB_EP_BULK;
+ 1346              		.loc 1 456 0
+ 1347 0cf0 0230A0E3 		mov	r3, #2
+ 1348 0cf4 20304BE5 		strb	r3, [fp, #-32]
+ 457:../cyfxmscdrv.c ****     epCfg.mult = 1;
+ 1349              		.loc 1 457 0
+ 1350 0cf8 0130A0E3 		mov	r3, #1
+ 1351 0cfc 1F304BE5 		strb	r3, [fp, #-31]
+ 458:../cyfxmscdrv.c ****     epCfg.maxPktSize = glMscEpSize;
+ 1352              		.loc 1 458 0
+ 1353 0d00 84339FE5 		ldr	r3, .L101+4
+ 1354 0d04 B030D3E1 		ldrh	r3, [r3, #0]
+ 1355 0d08 BE314BE1 		strh	r3, [fp, #-30]	@ movhi
+ 459:../cyfxmscdrv.c ****     epCfg.pollingRate = 0;
+ 1356              		.loc 1 459 0
+ 1357 0d0c 0030A0E3 		mov	r3, #0
+ 1358 0d10 1C304BE5 		strb	r3, [fp, #-28]
+ 460:../cyfxmscdrv.c ****     /* Since DMA buffer sizes can only be multiple of 16 bytes and
+ 461:../cyfxmscdrv.c ****      * also since this is an interrupt endpoint where the max data
+ 462:../cyfxmscdrv.c ****      * packet size is same as the maxPktSize field, the fullPktSize
+ 463:../cyfxmscdrv.c ****      * has to be a multiple of 16 bytes. */
+ 464:../cyfxmscdrv.c ****     size = ((glMscEpSize + 0x0F) & ~0x0F);
+ 1359              		.loc 1 464 0
+ 1360 0d14 70339FE5 		ldr	r3, .L101+4
+ 1361 0d18 B030D3E1 		ldrh	r3, [r3, #0]
+ 1362 0d1c 0F3083E2 		add	r3, r3, #15
+ 1363 0d20 0338A0E1 		mov	r3, r3, asl #16
+ 1364 0d24 2338A0E1 		mov	r3, r3, lsr #16
+ 1365 0d28 0F30C3E3 		bic	r3, r3, #15
+ 1366 0d2c B2314BE1 		strh	r3, [fp, #-18]	@ movhi
+ 465:../cyfxmscdrv.c ****     epCfg.fullPktSize = size;
+ 1367              		.loc 1 465 0
+ 1368 0d30 B2315BE1 		ldrh	r3, [fp, #-18]	@ movhi
+ 1369 0d34 BA314BE1 		strh	r3, [fp, #-26]	@ movhi
+ 466:../cyfxmscdrv.c ****     epCfg.isStreamMode = CyFalse;
+ 1370              		.loc 1 466 0
+ 1371 0d38 0030A0E3 		mov	r3, #0
+ 1372 0d3c 18300BE5 		str	r3, [fp, #-24]
+ 467:../cyfxmscdrv.c ****     status = CyU3PUsbHostEpAdd (glMscInEp, &epCfg);
+ 1373              		.loc 1 467 0
+ 1374 0d40 48339FE5 		ldr	r3, .L101+8
+ 1375 0d44 0020D3E5 		ldrb	r2, [r3, #0]	@ zero_extendqisi2
+ 1376 0d48 20304BE2 		sub	r3, fp, #32
+ 1377 0d4c 0200A0E1 		mov	r0, r2
+ 1378 0d50 0310A0E1 		mov	r1, r3
+ 1379 0d54 FEFFFFEB 		bl	CyU3PUsbHostEpAdd
+ 1380 0d58 0C000BE5 		str	r0, [fp, #-12]
+ 468:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1381              		.loc 1 468 0
+ 1382 0d5c 0C301BE5 		ldr	r3, [fp, #-12]
+ 1383 0d60 000053E3 		cmp	r3, #0
+ 1384 0d64 C000001A 		bne	.L95
+ 1385              	.L71:
+ 469:../cyfxmscdrv.c ****     {
+ 470:../cyfxmscdrv.c ****         goto enum_error;
+ 471:../cyfxmscdrv.c ****     }
+ 472:../cyfxmscdrv.c **** 
+ 473:../cyfxmscdrv.c ****     /* Add the OUT EP. */
+ 474:../cyfxmscdrv.c ****     status = CyU3PUsbHostEpAdd (glMscOutEp, &epCfg);
+ 1386              		.loc 1 474 0
+ 1387 0d68 24339FE5 		ldr	r3, .L101+12
+ 1388 0d6c 0020D3E5 		ldrb	r2, [r3, #0]	@ zero_extendqisi2
+ 1389 0d70 20304BE2 		sub	r3, fp, #32
+ 1390 0d74 0200A0E1 		mov	r0, r2
+ 1391 0d78 0310A0E1 		mov	r1, r3
+ 1392 0d7c FEFFFFEB 		bl	CyU3PUsbHostEpAdd
+ 1393 0d80 0C000BE5 		str	r0, [fp, #-12]
+ 475:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1394              		.loc 1 475 0
+ 1395 0d84 0C301BE5 		ldr	r3, [fp, #-12]
+ 1396 0d88 000053E3 		cmp	r3, #0
+ 1397 0d8c B800001A 		bne	.L96
+ 1398              	.L72:
+ 476:../cyfxmscdrv.c ****     {
+ 477:../cyfxmscdrv.c ****         goto enum_error;
+ 478:../cyfxmscdrv.c ****     }
+ 479:../cyfxmscdrv.c **** 
+ 480:../cyfxmscdrv.c ****     /* Create a DMA channel for IN EP. */
+ 481:../cyfxmscdrv.c ****     CyU3PMemSet ((uint8_t *)&dmaCfg, 0, sizeof(dmaCfg));
+ 1399              		.loc 1 481 0
+ 1400 0d90 3C304BE2 		sub	r3, fp, #60
+ 1401 0d94 0300A0E1 		mov	r0, r3
+ 1402 0d98 0010A0E3 		mov	r1, #0
+ 1403 0d9c 1C20A0E3 		mov	r2, #28
+ 1404 0da0 FEFFFFEB 		bl	CyU3PMemSet
+ 482:../cyfxmscdrv.c ****     dmaCfg.size = glMscEpSize;
+ 1405              		.loc 1 482 0
+ 1406 0da4 E0329FE5 		ldr	r3, .L101+4
+ 1407 0da8 B030D3E1 		ldrh	r3, [r3, #0]
+ 1408 0dac BC334BE1 		strh	r3, [fp, #-60]	@ movhi
+ 483:../cyfxmscdrv.c ****     dmaCfg.count = 0;
+ 1409              		.loc 1 483 0
+ 1410 0db0 0030A0E3 		mov	r3, #0
+ 1411 0db4 BA334BE1 		strh	r3, [fp, #-58]	@ movhi
+ 484:../cyfxmscdrv.c ****     dmaCfg.prodSckId = (CyU3PDmaSocketId_t)(CY_U3P_UIB_SOCKET_PROD_0 + (0x0F & glMscInEp));
+ 1412              		.loc 1 484 0
+ 1413 0db8 D0329FE5 		ldr	r3, .L101+8
+ 1414 0dbc 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1415 0dc0 0F3003E2 		and	r3, r3, #15
+ 1416 0dc4 0338A0E1 		mov	r3, r3, asl #16
+ 1417 0dc8 2338A0E1 		mov	r3, r3, lsr #16
+ 1418 0dcc 013B83E2 		add	r3, r3, #1024
+ 1419 0dd0 0338A0E1 		mov	r3, r3, asl #16
+ 1420 0dd4 2338A0E1 		mov	r3, r3, lsr #16
+ 1421 0dd8 B8334BE1 		strh	r3, [fp, #-56]	@ movhi
+ 485:../cyfxmscdrv.c ****     dmaCfg.consSckId = CY_U3P_CPU_SOCKET_CONS;
+ 1422              		.loc 1 485 0
+ 1423 0ddc 3F3CA0E3 		mov	r3, #16128
+ 1424 0de0 B6334BE1 		strh	r3, [fp, #-54]	@ movhi
+ 486:../cyfxmscdrv.c ****     dmaCfg.dmaMode = CY_U3P_DMA_MODE_BYTE;
+ 1425              		.loc 1 486 0
+ 1426 0de4 0030A0E3 		mov	r3, #0
+ 1427 0de8 2C304BE5 		strb	r3, [fp, #-44]
+ 487:../cyfxmscdrv.c ****     dmaCfg.notification = 0;
+ 1428              		.loc 1 487 0
+ 1429 0dec 0030A0E3 		mov	r3, #0
+ 1430 0df0 28300BE5 		str	r3, [fp, #-40]
+ 488:../cyfxmscdrv.c ****     dmaCfg.cb = NULL;
+ 1431              		.loc 1 488 0
+ 1432 0df4 0030A0E3 		mov	r3, #0
+ 1433 0df8 24300BE5 		str	r3, [fp, #-36]
+ 489:../cyfxmscdrv.c ****     dmaCfg.prodHeader = 0;
+ 1434              		.loc 1 489 0
+ 1435 0dfc 0030A0E3 		mov	r3, #0
+ 1436 0e00 B2334BE1 		strh	r3, [fp, #-50]	@ movhi
+ 490:../cyfxmscdrv.c ****     dmaCfg.prodFooter = 0;
+ 1437              		.loc 1 490 0
+ 1438 0e04 0030A0E3 		mov	r3, #0
+ 1439 0e08 B0334BE1 		strh	r3, [fp, #-48]	@ movhi
+ 491:../cyfxmscdrv.c ****     dmaCfg.consHeader = 0;
+ 1440              		.loc 1 491 0
+ 1441 0e0c 0030A0E3 		mov	r3, #0
+ 1442 0e10 BE324BE1 		strh	r3, [fp, #-46]	@ movhi
+ 492:../cyfxmscdrv.c ****     dmaCfg.prodAvailCount = 0;
+ 1443              		.loc 1 492 0
+ 1444 0e14 0030A0E3 		mov	r3, #0
+ 1445 0e18 B4334BE1 		strh	r3, [fp, #-52]	@ movhi
+ 493:../cyfxmscdrv.c ****     status = CyU3PDmaChannelCreate (&glMscInCh, CY_U3P_DMA_TYPE_MANUAL_IN, &dmaCfg);
+ 1446              		.loc 1 493 0
+ 1447 0e1c 3C304BE2 		sub	r3, fp, #60
+ 1448 0e20 70029FE5 		ldr	r0, .L101+16
+ 1449 0e24 0310A0E3 		mov	r1, #3
+ 1450 0e28 0320A0E1 		mov	r2, r3
+ 1451 0e2c FEFFFFEB 		bl	CyU3PDmaChannelCreate
+ 1452 0e30 0C000BE5 		str	r0, [fp, #-12]
+ 494:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1453              		.loc 1 494 0
+ 1454 0e34 0C301BE5 		ldr	r3, [fp, #-12]
+ 1455 0e38 000053E3 		cmp	r3, #0
+ 1456 0e3c 4C00001A 		bne	.L97
+ 1457              	.L73:
+ 495:../cyfxmscdrv.c ****     {
+ 496:../cyfxmscdrv.c ****         goto app_error;
+ 497:../cyfxmscdrv.c ****     }
+ 498:../cyfxmscdrv.c **** 
+ 499:../cyfxmscdrv.c ****     /* Create a DMA channel for OUT EP. */
+ 500:../cyfxmscdrv.c ****     dmaCfg.prodSckId = CY_U3P_CPU_SOCKET_PROD;
+ 1458              		.loc 1 500 0
+ 1459 0e40 54329FE5 		ldr	r3, .L101+20
+ 1460 0e44 B8334BE1 		strh	r3, [fp, #-56]	@ movhi
+ 501:../cyfxmscdrv.c ****     dmaCfg.consSckId = (CyU3PDmaSocketId_t)(CY_U3P_UIB_SOCKET_CONS_0 + (0x0F & glMscOutEp));
+ 1461              		.loc 1 501 0
+ 1462 0e48 44329FE5 		ldr	r3, .L101+12
+ 1463 0e4c 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1464 0e50 0F3003E2 		and	r3, r3, #15
+ 1465 0e54 0338A0E1 		mov	r3, r3, asl #16
+ 1466 0e58 2338A0E1 		mov	r3, r3, lsr #16
+ 1467 0e5c 033C83E2 		add	r3, r3, #768
+ 1468 0e60 0338A0E1 		mov	r3, r3, asl #16
+ 1469 0e64 2338A0E1 		mov	r3, r3, lsr #16
+ 1470 0e68 B6334BE1 		strh	r3, [fp, #-54]	@ movhi
+ 502:../cyfxmscdrv.c ****     status = CyU3PDmaChannelCreate (&glMscOutCh, CY_U3P_DMA_TYPE_MANUAL_OUT, &dmaCfg);
+ 1471              		.loc 1 502 0
+ 1472 0e6c 3C304BE2 		sub	r3, fp, #60
+ 1473 0e70 28029FE5 		ldr	r0, .L101+24
+ 1474 0e74 0410A0E3 		mov	r1, #4
+ 1475 0e78 0320A0E1 		mov	r2, r3
+ 1476 0e7c FEFFFFEB 		bl	CyU3PDmaChannelCreate
+ 1477 0e80 0C000BE5 		str	r0, [fp, #-12]
+ 503:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1478              		.loc 1 503 0
+ 1479 0e84 0C301BE5 		ldr	r3, [fp, #-12]
+ 1480 0e88 000053E3 		cmp	r3, #0
+ 1481 0e8c 3A00001A 		bne	.L98
+ 1482              	.L75:
+ 504:../cyfxmscdrv.c ****     {
+ 505:../cyfxmscdrv.c ****         goto app_error;
+ 506:../cyfxmscdrv.c ****     }
+ 507:../cyfxmscdrv.c **** 
+ 508:../cyfxmscdrv.c ****     for (retry = 0; retry < CY_FX_MSC_MAX_RETRY; retry++)
+ 1483              		.loc 1 508 0
+ 1484 0e90 0030A0E3 		mov	r3, #0
+ 1485 0e94 06304BE5 		strb	r3, [fp, #-6]
+ 1486 0e98 1C0000EA 		b	.L76
+ 1487              	.L83:
+ 509:../cyfxmscdrv.c ****     {
+ 510:../cyfxmscdrv.c ****         /* Give some time for the device to initialize. */
+ 511:../cyfxmscdrv.c ****         CyU3PThreadSleep (1000);
+ 1488              		.loc 1 511 0
+ 1489 0e9c FA0FA0E3 		mov	r0, #1000
+ 1490 0ea0 FEFFFFEB 		bl	_tx_thread_sleep
+ 512:../cyfxmscdrv.c ****         for (i = 0; i <= maxLun; i++)
+ 1491              		.loc 1 512 0
+ 1492 0ea4 0030A0E3 		mov	r3, #0
+ 1493 0ea8 05304BE5 		strb	r3, [fp, #-5]
+ 1494 0eac 0D0000EA 		b	.L77
+ 1495              	.L80:
+ 513:../cyfxmscdrv.c ****         {
+ 514:../cyfxmscdrv.c ****             /* Check if the unit is ready. */
+ 515:../cyfxmscdrv.c ****             status = CyFxMscTestUnitReady (maxLun);
+ 1496              		.loc 1 515 0
+ 1497 0eb0 0D305BE5 		ldrb	r3, [fp, #-13]	@ zero_extendqisi2
+ 1498 0eb4 0300A0E1 		mov	r0, r3
+ 1499 0eb8 FEFFFFEB 		bl	CyFxMscTestUnitReady
+ 1500 0ebc 0C000BE5 		str	r0, [fp, #-12]
+ 516:../cyfxmscdrv.c ****             if (status == CY_U3P_SUCCESS)
+ 1501              		.loc 1 516 0
+ 1502 0ec0 0C301BE5 		ldr	r3, [fp, #-12]
+ 1503 0ec4 000053E3 		cmp	r3, #0
+ 1504 0ec8 0300001A 		bne	.L78
+ 517:../cyfxmscdrv.c ****             {
+ 518:../cyfxmscdrv.c ****                 glMscTestLun = i;
+ 1505              		.loc 1 518 0
+ 1506 0ecc D0319FE5 		ldr	r3, .L101+28
+ 1507 0ed0 05205BE5 		ldrb	r2, [fp, #-5]
+ 1508 0ed4 0020C3E5 		strb	r2, [r3, #0]
+ 519:../cyfxmscdrv.c ****                 break;
+ 1509              		.loc 1 519 0
+ 1510 0ed8 060000EA 		b	.L79
+ 1511              	.L78:
+ 512:../cyfxmscdrv.c ****         for (i = 0; i <= maxLun; i++)
+ 1512              		.loc 1 512 0
+ 1513 0edc 05305BE5 		ldrb	r3, [fp, #-5]
+ 1514 0ee0 013083E2 		add	r3, r3, #1
+ 1515 0ee4 05304BE5 		strb	r3, [fp, #-5]
+ 1516              	.L77:
+ 512:../cyfxmscdrv.c ****         for (i = 0; i <= maxLun; i++)
+ 1517              		.loc 1 512 0 is_stmt 0 discriminator 1
+ 1518 0ee8 05205BE5 		ldrb	r2, [fp, #-5]	@ zero_extendqisi2
+ 1519 0eec 0D305BE5 		ldrb	r3, [fp, #-13]	@ zero_extendqisi2
+ 1520 0ef0 030052E1 		cmp	r2, r3
+ 1521 0ef4 EDFFFF9A 		bls	.L80
+ 1522              	.L79:
+ 520:../cyfxmscdrv.c ****             }
+ 521:../cyfxmscdrv.c ****         }
+ 522:../cyfxmscdrv.c **** 
+ 523:../cyfxmscdrv.c ****         if (status == CY_U3P_SUCCESS)
+ 1523              		.loc 1 523 0 is_stmt 1
+ 1524 0ef8 0C301BE5 		ldr	r3, [fp, #-12]
+ 1525 0efc 000053E3 		cmp	r3, #0
+ 1526 0f00 0600000A 		beq	.L99
+ 1527              	.L81:
+ 508:../cyfxmscdrv.c ****     for (retry = 0; retry < CY_FX_MSC_MAX_RETRY; retry++)
+ 1528              		.loc 1 508 0
+ 1529 0f04 06305BE5 		ldrb	r3, [fp, #-6]
+ 1530 0f08 013083E2 		add	r3, r3, #1
+ 1531 0f0c 06304BE5 		strb	r3, [fp, #-6]
+ 1532              	.L76:
+ 508:../cyfxmscdrv.c ****     for (retry = 0; retry < CY_FX_MSC_MAX_RETRY; retry++)
+ 1533              		.loc 1 508 0 is_stmt 0 discriminator 1
+ 1534 0f10 06305BE5 		ldrb	r3, [fp, #-6]	@ zero_extendqisi2
+ 1535 0f14 090053E3 		cmp	r3, #9
+ 1536 0f18 DFFFFF9A 		bls	.L83
+ 1537 0f1c 000000EA 		b	.L82
+ 1538              	.L99:
+ 524:../cyfxmscdrv.c ****         {
+ 525:../cyfxmscdrv.c ****             break;
+ 1539              		.loc 1 525 0 is_stmt 1
+ 1540 0f20 0000A0E1 		mov	r0, r0	@ nop
+ 1541              	.L82:
+ 526:../cyfxmscdrv.c ****         }
+ 527:../cyfxmscdrv.c ****     }
+ 528:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1542              		.loc 1 528 0
+ 1543 0f24 0C301BE5 		ldr	r3, [fp, #-12]
+ 1544 0f28 000053E3 		cmp	r3, #0
+ 1545 0f2c 0300000A 		beq	.L84
+ 529:../cyfxmscdrv.c ****     {
+ 530:../cyfxmscdrv.c ****         glMscTestLun = 0;
+ 1546              		.loc 1 530 0
+ 1547 0f30 6C319FE5 		ldr	r3, .L101+28
+ 1548 0f34 0020A0E3 		mov	r2, #0
+ 1549 0f38 0020C3E5 		strb	r2, [r3, #0]
+ 531:../cyfxmscdrv.c ****         goto app_error;
+ 1550              		.loc 1 531 0
+ 1551 0f3c 110000EA 		b	.L74
+ 1552              	.L84:
+ 532:../cyfxmscdrv.c ****     }
+ 533:../cyfxmscdrv.c **** 
+ 534:../cyfxmscdrv.c ****     /* Read the device capacity. */
+ 535:../cyfxmscdrv.c ****     status = CyFxMscReadCapacity (glMscTestLun);
+ 1553              		.loc 1 535 0
+ 1554 0f40 5C319FE5 		ldr	r3, .L101+28
+ 1555 0f44 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1556 0f48 0300A0E1 		mov	r0, r3
+ 1557 0f4c FEFFFFEB 		bl	CyFxMscReadCapacity
+ 1558 0f50 0C000BE5 		str	r0, [fp, #-12]
+ 536:../cyfxmscdrv.c ****     if (status != CY_U3P_SUCCESS)
+ 1559              		.loc 1 536 0
+ 1560 0f54 0C301BE5 		ldr	r3, [fp, #-12]
+ 1561 0f58 000053E3 		cmp	r3, #0
+ 1562 0f5c 0800001A 		bne	.L100
+ 1563              	.L85:
+ 537:../cyfxmscdrv.c ****     {
+ 538:../cyfxmscdrv.c ****         goto app_error;
+ 539:../cyfxmscdrv.c ****     }
+ 540:../cyfxmscdrv.c **** 
+ 541:../cyfxmscdrv.c ****     glMscIsActive = CyTrue;
+ 1564              		.loc 1 541 0
+ 1565 0f60 40319FE5 		ldr	r3, .L101+32
+ 1566 0f64 0120A0E3 		mov	r2, #1
+ 1567 0f68 002083E5 		str	r2, [r3, #0]
+ 542:../cyfxmscdrv.c ****     return status;
+ 1568              		.loc 1 542 0
+ 1569 0f6c 0C301BE5 		ldr	r3, [fp, #-12]
+ 1570 0f70 410000EA 		b	.L86
+ 1571              	.L97:
+ 496:../cyfxmscdrv.c ****         goto app_error;
+ 1572              		.loc 1 496 0
+ 1573 0f74 0000A0E1 		mov	r0, r0	@ nop
+ 1574 0f78 020000EA 		b	.L74
+ 1575              	.L98:
+ 505:../cyfxmscdrv.c ****         goto app_error;
+ 1576              		.loc 1 505 0
+ 1577 0f7c 0000A0E1 		mov	r0, r0	@ nop
+ 1578 0f80 000000EA 		b	.L74
+ 1579              	.L100:
+ 538:../cyfxmscdrv.c ****         goto app_error;
+ 1580              		.loc 1 538 0
+ 1581 0f84 0000A0E1 		mov	r0, r0	@ nop
+ 1582              	.L74:
+ 543:../cyfxmscdrv.c **** 
+ 544:../cyfxmscdrv.c **** app_error:
+ 545:../cyfxmscdrv.c ****     CyU3PDmaChannelDestroy (&glMscInCh);
+ 1583              		.loc 1 545 0
+ 1584 0f88 08019FE5 		ldr	r0, .L101+16
+ 1585 0f8c FEFFFFEB 		bl	CyU3PDmaChannelDestroy
+ 546:../cyfxmscdrv.c ****     if (glMscInEp != 0)
+ 1586              		.loc 1 546 0
+ 1587 0f90 F8309FE5 		ldr	r3, .L101+8
+ 1588 0f94 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1589 0f98 000053E3 		cmp	r3, #0
+ 1590 0f9c 0600000A 		beq	.L87
+ 547:../cyfxmscdrv.c ****     {
+ 548:../cyfxmscdrv.c ****         CyU3PUsbHostEpRemove (glMscInEp);
+ 1591              		.loc 1 548 0
+ 1592 0fa0 E8309FE5 		ldr	r3, .L101+8
+ 1593 0fa4 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1594 0fa8 0300A0E1 		mov	r0, r3
+ 1595 0fac FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 549:../cyfxmscdrv.c ****         glMscInEp = 0;
+ 1596              		.loc 1 549 0
+ 1597 0fb0 D8309FE5 		ldr	r3, .L101+8
+ 1598 0fb4 0020A0E3 		mov	r2, #0
+ 1599 0fb8 0020C3E5 		strb	r2, [r3, #0]
+ 1600              	.L87:
+ 550:../cyfxmscdrv.c ****     }
+ 551:../cyfxmscdrv.c ****     CyU3PDmaChannelDestroy (&glMscOutCh);
+ 1601              		.loc 1 551 0
+ 1602 0fbc DC009FE5 		ldr	r0, .L101+24
+ 1603 0fc0 FEFFFFEB 		bl	CyU3PDmaChannelDestroy
+ 552:../cyfxmscdrv.c ****     if (glMscOutEp != 0)
+ 1604              		.loc 1 552 0
+ 1605 0fc4 C8309FE5 		ldr	r3, .L101+12
+ 1606 0fc8 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1607 0fcc 000053E3 		cmp	r3, #0
+ 1608 0fd0 0600000A 		beq	.L88
+ 553:../cyfxmscdrv.c ****     {
+ 554:../cyfxmscdrv.c ****         CyU3PUsbHostEpRemove (glMscOutEp);
+ 1609              		.loc 1 554 0
+ 1610 0fd4 B8309FE5 		ldr	r3, .L101+12
+ 1611 0fd8 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1612 0fdc 0300A0E1 		mov	r0, r3
+ 1613 0fe0 FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 555:../cyfxmscdrv.c ****         glMscOutEp = 0;
+ 1614              		.loc 1 555 0
+ 1615 0fe4 A8309FE5 		ldr	r3, .L101+12
+ 1616 0fe8 0020A0E3 		mov	r2, #0
+ 1617 0fec 0020C3E5 		strb	r2, [r3, #0]
+ 1618              	.L88:
+ 556:../cyfxmscdrv.c ****     }
+ 557:../cyfxmscdrv.c **** 
+ 558:../cyfxmscdrv.c ****     glMscEpSize = 0;
+ 1619              		.loc 1 558 0
+ 1620 0ff0 94309FE5 		ldr	r3, .L101+4
+ 1621 0ff4 0020A0E3 		mov	r2, #0
+ 1622 0ff8 B020C3E1 		strh	r2, [r3, #0]	@ movhi
+ 559:../cyfxmscdrv.c ****     glMscSectorSize = 0;
+ 1623              		.loc 1 559 0
+ 1624 0ffc A8309FE5 		ldr	r3, .L101+36
+ 1625 1000 0020A0E3 		mov	r2, #0
+ 1626 1004 B020C3E1 		strh	r2, [r3, #0]	@ movhi
+ 560:../cyfxmscdrv.c ****     glMscCapacity = 0;
+ 1627              		.loc 1 560 0
+ 1628 1008 A0309FE5 		ldr	r3, .L101+40
+ 1629 100c 0020A0E3 		mov	r2, #0
+ 1630 1010 002083E5 		str	r2, [r3, #0]
+ 561:../cyfxmscdrv.c ****     glMscTestLun = 0;
+ 1631              		.loc 1 561 0
+ 1632 1014 88309FE5 		ldr	r3, .L101+28
+ 1633 1018 0020A0E3 		mov	r2, #0
+ 1634 101c 0020C3E5 		strb	r2, [r3, #0]
+ 562:../cyfxmscdrv.c ****     glMscTestSector = 0;
+ 1635              		.loc 1 562 0
+ 1636 1020 8C309FE5 		ldr	r3, .L101+44
+ 1637 1024 0020A0E3 		mov	r2, #0
+ 1638 1028 002083E5 		str	r2, [r3, #0]
+ 563:../cyfxmscdrv.c ****     glTimerCount = 0;
+ 1639              		.loc 1 563 0
+ 1640 102c 84309FE5 		ldr	r3, .L101+48
+ 1641 1030 0020A0E3 		mov	r2, #0
+ 1642 1034 002083E5 		str	r2, [r3, #0]
+ 1643 1038 0E0000EA 		b	.L61
+ 1644              	.L89:
+ 390:../cyfxmscdrv.c ****         goto enum_error;
+ 1645              		.loc 1 390 0
+ 1646 103c 0000A0E1 		mov	r0, r0	@ nop
+ 1647 1040 0C0000EA 		b	.L61
+ 1648              	.L90:
+ 397:../cyfxmscdrv.c ****         goto enum_error;
+ 1649              		.loc 1 397 0
+ 1650 1044 0000A0E1 		mov	r0, r0	@ nop
+ 1651 1048 0A0000EA 		b	.L61
+ 1652              	.L91:
+ 405:../cyfxmscdrv.c ****         goto enum_error;
+ 1653              		.loc 1 405 0
+ 1654 104c 0000A0E1 		mov	r0, r0	@ nop
+ 1655 1050 080000EA 		b	.L61
+ 1656              	.L92:
+ 416:../cyfxmscdrv.c ****                 goto enum_error;
+ 1657              		.loc 1 416 0
+ 1658 1054 0000A0E1 		mov	r0, r0	@ nop
+ 1659 1058 060000EA 		b	.L61
+ 1660              	.L93:
+ 441:../cyfxmscdrv.c ****         goto enum_error;
+ 1661              		.loc 1 441 0
+ 1662 105c 0000A0E1 		mov	r0, r0	@ nop
+ 1663 1060 040000EA 		b	.L61
+ 1664              	.L94:
+ 450:../cyfxmscdrv.c ****         goto enum_error;
+ 1665              		.loc 1 450 0
+ 1666 1064 0000A0E1 		mov	r0, r0	@ nop
+ 1667 1068 020000EA 		b	.L61
+ 1668              	.L95:
+ 470:../cyfxmscdrv.c ****         goto enum_error;
+ 1669              		.loc 1 470 0
+ 1670 106c 0000A0E1 		mov	r0, r0	@ nop
+ 1671 1070 000000EA 		b	.L61
+ 1672              	.L96:
+ 477:../cyfxmscdrv.c ****         goto enum_error;
+ 1673              		.loc 1 477 0
+ 1674 1074 0000A0E1 		mov	r0, r0	@ nop
+ 1675              	.L61:
+ 564:../cyfxmscdrv.c **** 
+ 565:../cyfxmscdrv.c **** enum_error:
+ 566:../cyfxmscdrv.c ****     return CY_U3P_ERROR_FAILURE;
+ 1676              		.loc 1 566 0
+ 1677 1078 4A30A0E3 		mov	r3, #74
+ 1678              	.L86:
+ 567:../cyfxmscdrv.c **** }
+ 1679              		.loc 1 567 0
+ 1680 107c 0300A0E1 		mov	r0, r3
+ 1681 1080 04D04BE2 		sub	sp, fp, #4
+ 1682 1084 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1683              	.L102:
+ 1684              		.align	2
+ 1685              	.L101:
+ 1686 1088 00000000 		.word	glEp0Buffer
+ 1687 108c 00000000 		.word	glMscEpSize
+ 1688 1090 00000000 		.word	glMscInEp
+ 1689 1094 00000000 		.word	glMscOutEp
+ 1690 1098 00000000 		.word	glMscInCh
+ 1691 109c 013F0000 		.word	16129
+ 1692 10a0 00000000 		.word	glMscOutCh
+ 1693 10a4 00000000 		.word	glMscTestLun
+ 1694 10a8 00000000 		.word	glMscIsActive
+ 1695 10ac 00000000 		.word	glMscSectorSize
+ 1696 10b0 00000000 		.word	glMscCapacity
+ 1697 10b4 00000000 		.word	glMscTestSector
+ 1698 10b8 00000000 		.word	glTimerCount
+ 1699              		.cfi_endproc
+ 1700              	.LFE10:
+ 1702              		.align	2
+ 1703              		.global	CyFxMscDriverDeInit
+ 1705              	CyFxMscDriverDeInit:
+ 1706              	.LFB11:
+ 568:../cyfxmscdrv.c **** 
+ 569:../cyfxmscdrv.c **** void
+ 570:../cyfxmscdrv.c **** CyFxMscDriverDeInit ()
+ 571:../cyfxmscdrv.c **** {
+ 1707              		.loc 1 571 0
+ 1708              		.cfi_startproc
+ 1709              		@ args = 0, pretend = 0, frame = 0
+ 1710              		@ frame_needed = 1, uses_anonymous_args = 0
+ 1711 10bc 00482DE9 		stmfd	sp!, {fp, lr}
+ 1712              	.LCFI22:
+ 1713              		.cfi_def_cfa_offset 8
+ 1714 10c0 04B08DE2 		add	fp, sp, #4
+ 1715              		.cfi_offset 14, -4
+ 1716              		.cfi_offset 11, -8
+ 1717              	.LCFI23:
+ 1718              		.cfi_def_cfa 11, 4
+ 572:../cyfxmscdrv.c ****     /* Clear all variables. */
+ 573:../cyfxmscdrv.c ****     glMscIsActive = CyFalse;
+ 1719              		.loc 1 573 0
+ 1720 10c4 B8309FE5 		ldr	r3, .L106
+ 1721 10c8 0020A0E3 		mov	r2, #0
+ 1722 10cc 002083E5 		str	r2, [r3, #0]
+ 574:../cyfxmscdrv.c ****     glMscEpSize = 0;
+ 1723              		.loc 1 574 0
+ 1724 10d0 B0309FE5 		ldr	r3, .L106+4
+ 1725 10d4 0020A0E3 		mov	r2, #0
+ 1726 10d8 B020C3E1 		strh	r2, [r3, #0]	@ movhi
+ 575:../cyfxmscdrv.c ****     glMscSectorSize = 0;
+ 1727              		.loc 1 575 0
+ 1728 10dc A8309FE5 		ldr	r3, .L106+8
+ 1729 10e0 0020A0E3 		mov	r2, #0
+ 1730 10e4 B020C3E1 		strh	r2, [r3, #0]	@ movhi
+ 576:../cyfxmscdrv.c ****     glMscCapacity = 0;
+ 1731              		.loc 1 576 0
+ 1732 10e8 A0309FE5 		ldr	r3, .L106+12
+ 1733 10ec 0020A0E3 		mov	r2, #0
+ 1734 10f0 002083E5 		str	r2, [r3, #0]
+ 577:../cyfxmscdrv.c ****     glMscTestLun = 0;
+ 1735              		.loc 1 577 0
+ 1736 10f4 98309FE5 		ldr	r3, .L106+16
+ 1737 10f8 0020A0E3 		mov	r2, #0
+ 1738 10fc 0020C3E5 		strb	r2, [r3, #0]
+ 578:../cyfxmscdrv.c ****     glMscTestSector = 0;
+ 1739              		.loc 1 578 0
+ 1740 1100 90309FE5 		ldr	r3, .L106+20
+ 1741 1104 0020A0E3 		mov	r2, #0
+ 1742 1108 002083E5 		str	r2, [r3, #0]
+ 579:../cyfxmscdrv.c ****     glTimerCount = 0;
+ 1743              		.loc 1 579 0
+ 1744 110c 88309FE5 		ldr	r3, .L106+24
+ 1745 1110 0020A0E3 		mov	r2, #0
+ 1746 1114 002083E5 		str	r2, [r3, #0]
+ 580:../cyfxmscdrv.c **** 
+ 581:../cyfxmscdrv.c ****     CyU3PDmaChannelDestroy (&glMscInCh);
+ 1747              		.loc 1 581 0
+ 1748 1118 80009FE5 		ldr	r0, .L106+28
+ 1749 111c FEFFFFEB 		bl	CyU3PDmaChannelDestroy
+ 582:../cyfxmscdrv.c ****     if (glMscInEp != 0)
+ 1750              		.loc 1 582 0
+ 1751 1120 7C309FE5 		ldr	r3, .L106+32
+ 1752 1124 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1753 1128 000053E3 		cmp	r3, #0
+ 1754 112c 0600000A 		beq	.L104
+ 583:../cyfxmscdrv.c ****     {
+ 584:../cyfxmscdrv.c ****         CyU3PUsbHostEpRemove (glMscInEp);
+ 1755              		.loc 1 584 0
+ 1756 1130 6C309FE5 		ldr	r3, .L106+32
+ 1757 1134 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1758 1138 0300A0E1 		mov	r0, r3
+ 1759 113c FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 585:../cyfxmscdrv.c ****         glMscInEp = 0;
+ 1760              		.loc 1 585 0
+ 1761 1140 5C309FE5 		ldr	r3, .L106+32
+ 1762 1144 0020A0E3 		mov	r2, #0
+ 1763 1148 0020C3E5 		strb	r2, [r3, #0]
+ 1764              	.L104:
+ 586:../cyfxmscdrv.c ****     }
+ 587:../cyfxmscdrv.c ****     CyU3PDmaChannelDestroy (&glMscOutCh);
+ 1765              		.loc 1 587 0
+ 1766 114c 54009FE5 		ldr	r0, .L106+36
+ 1767 1150 FEFFFFEB 		bl	CyU3PDmaChannelDestroy
+ 588:../cyfxmscdrv.c ****     if (glMscOutEp != 0)
+ 1768              		.loc 1 588 0
+ 1769 1154 50309FE5 		ldr	r3, .L106+40
+ 1770 1158 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1771 115c 000053E3 		cmp	r3, #0
+ 1772 1160 0600000A 		beq	.L103
+ 589:../cyfxmscdrv.c ****     {
+ 590:../cyfxmscdrv.c ****         CyU3PUsbHostEpRemove (glMscOutEp);
+ 1773              		.loc 1 590 0
+ 1774 1164 40309FE5 		ldr	r3, .L106+40
+ 1775 1168 0030D3E5 		ldrb	r3, [r3, #0]	@ zero_extendqisi2
+ 1776 116c 0300A0E1 		mov	r0, r3
+ 1777 1170 FEFFFFEB 		bl	CyU3PUsbHostEpRemove
+ 591:../cyfxmscdrv.c ****         glMscOutEp = 0;
+ 1778              		.loc 1 591 0
+ 1779 1174 30309FE5 		ldr	r3, .L106+40
+ 1780 1178 0020A0E3 		mov	r2, #0
+ 1781 117c 0020C3E5 		strb	r2, [r3, #0]
+ 1782              	.L103:
+ 592:../cyfxmscdrv.c ****     }
+ 593:../cyfxmscdrv.c **** }
+ 1783              		.loc 1 593 0
+ 1784 1180 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1785              	.L107:
+ 1786              		.align	2
+ 1787              	.L106:
+ 1788 1184 00000000 		.word	glMscIsActive
+ 1789 1188 00000000 		.word	glMscEpSize
+ 1790 118c 00000000 		.word	glMscSectorSize
+ 1791 1190 00000000 		.word	glMscCapacity
+ 1792 1194 00000000 		.word	glMscTestLun
+ 1793 1198 00000000 		.word	glMscTestSector
+ 1794 119c 00000000 		.word	glTimerCount
+ 1795 11a0 00000000 		.word	glMscInCh
+ 1796 11a4 00000000 		.word	glMscInEp
+ 1797 11a8 00000000 		.word	glMscOutCh
+ 1798 11ac 00000000 		.word	glMscOutEp
+ 1799              		.cfi_endproc
+ 1800              	.LFE11:
+ 1802              		.section	.rodata
+ 1803              		.align	2
+ 1804              	.LC0:
+ 1805 0000 53746172 		.ascii	"Starting MSC read / write tests.\015\012\000"
+ 1805      74696E67 
+ 1805      204D5343 
+ 1805      20726561 
+ 1805      64202F20 
+ 1806 0023 00       		.align	2
+ 1807              	.LC1:
+ 1808 0024 52656164 		.ascii	"Reading from sector: %d.\015\012\000"
+ 1808      696E6720 
+ 1808      66726F6D 
+ 1808      20736563 
+ 1808      746F723A 
+ 1809 003f 00       		.align	2
+ 1810              	.LC2:
+ 1811 0040 436F6D70 		.ascii	"Completed MSC read / write tests.\015\012\000"
+ 1811      6C657465 
+ 1811      64204D53 
+ 1811      43207265 
+ 1811      6164202F 
+ 1812              		.align	2
+ 1813              	.LC3:
+ 1814 0064 4D534320 		.ascii	"MSC test failed with status: %d.\015\012\000"
+ 1814      74657374 
+ 1814      20666169 
+ 1814      6C656420 
+ 1814      77697468 
+ 1815 0087 00       		.text
+ 1816              		.align	2
+ 1817              		.global	CyFxMscDriverDoWork
+ 1819              	CyFxMscDriverDoWork:
+ 1820              	.LFB12:
+ 594:../cyfxmscdrv.c **** 
+ 595:../cyfxmscdrv.c **** void
+ 596:../cyfxmscdrv.c **** CyFxMscDriverDoWork ()
+ 597:../cyfxmscdrv.c **** {
+ 1821              		.loc 1 597 0
+ 1822              		.cfi_startproc
+ 1823              		@ args = 0, pretend = 0, frame = 16
+ 1824              		@ frame_needed = 1, uses_anonymous_args = 0
+ 1825 11b0 00482DE9 		stmfd	sp!, {fp, lr}
+ 1826              	.LCFI24:
+ 1827              		.cfi_def_cfa_offset 8
+ 1828 11b4 04B08DE2 		add	fp, sp, #4
+ 1829              		.cfi_offset 14, -4
+ 1830              		.cfi_offset 11, -8
+ 1831              	.LCFI25:
+ 1832              		.cfi_def_cfa 11, 4
+ 1833 11b8 10D04DE2 		sub	sp, sp, #16
+ 598:../cyfxmscdrv.c ****     uint32_t upTime = 0;
+ 1834              		.loc 1 598 0
+ 1835 11bc 0030A0E3 		mov	r3, #0
+ 1836 11c0 10300BE5 		str	r3, [fp, #-16]
+ 599:../cyfxmscdrv.c ****     uint16_t index = 0;
+ 1837              		.loc 1 599 0
+ 1838 11c4 0030A0E3 		mov	r3, #0
+ 1839 11c8 B6304BE1 		strh	r3, [fp, #-6]	@ movhi
+ 600:../cyfxmscdrv.c ****     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+ 1840              		.loc 1 600 0
+ 1841 11cc 0030A0E3 		mov	r3, #0
+ 1842 11d0 0C300BE5 		str	r3, [fp, #-12]
+ 601:../cyfxmscdrv.c **** #ifdef CY_FX_MSC_ENABLE_WRITE_TEST
+ 602:../cyfxmscdrv.c ****     uint16_t temp;
+ 603:../cyfxmscdrv.c ****     uint8_t pattern = 0;
+ 604:../cyfxmscdrv.c **** #endif /* CY_FX_MSC_ENABLE_WRITE_TEST */
+ 605:../cyfxmscdrv.c **** 
+ 606:../cyfxmscdrv.c ****     /* Host polling interval. */
+ 607:../cyfxmscdrv.c ****     upTime = glTimerCount * CY_FX_HOST_POLL_INTERVAL;
+ 1843              		.loc 1 607 0
+ 1844 11d4 74319FE5 		ldr	r3, .L118
+ 1845 11d8 003093E5 		ldr	r3, [r3, #0]
+ 1846 11dc 6420A0E3 		mov	r2, #100
+ 1847 11e0 920303E0 		mul	r3, r2, r3
+ 1848 11e4 10300BE5 		str	r3, [fp, #-16]
+ 608:../cyfxmscdrv.c ****     glTimerCount++;
+ 1849              		.loc 1 608 0
+ 1850 11e8 60319FE5 		ldr	r3, .L118
+ 1851 11ec 003093E5 		ldr	r3, [r3, #0]
+ 1852 11f0 012083E2 		add	r2, r3, #1
+ 1853 11f4 54319FE5 		ldr	r3, .L118
+ 1854 11f8 002083E5 		str	r2, [r3, #0]
+ 609:../cyfxmscdrv.c ****     if ((glMscIsActive) && ((upTime % CY_FX_MSC_TEST_INTERVAL) == 0))
+ 1855              		.loc 1 609 0
+ 1856 11fc 50319FE5 		ldr	r3, .L118+4
+ 1857 1200 003093E5 		ldr	r3, [r3, #0]
+ 1858 1204 000053E3 		cmp	r3, #0
+ 1859 1208 4E00000A 		beq	.L108
+ 1860              		.loc 1 609 0 is_stmt 0 discriminator 1
+ 1861 120c 10201BE5 		ldr	r2, [fp, #-16]
+ 1862 1210 40319FE5 		ldr	r3, .L118+8
+ 1863 1214 921383E0 		umull	r1, r3, r2, r3
+ 1864 1218 2337A0E1 		mov	r3, r3, lsr #14
+ 1865 121c 38119FE5 		ldr	r1, .L118+12
+ 1866 1220 910303E0 		mul	r3, r1, r3
+ 1867 1224 023063E0 		rsb	r3, r3, r2
+ 1868 1228 000053E3 		cmp	r3, #0
+ 1869 122c 4500001A 		bne	.L108
+ 610:../cyfxmscdrv.c ****     {
+ 611:../cyfxmscdrv.c ****         CyU3PDebugPrint (4, "Starting MSC read / write tests.\r\n");
+ 1870              		.loc 1 611 0 is_stmt 1
+ 1871 1230 0400A0E3 		mov	r0, #4
+ 1872 1234 24119FE5 		ldr	r1, .L118+16
+ 1873 1238 FEFFFFEB 		bl	CyU3PDebugPrint
+ 612:../cyfxmscdrv.c ****         /* Write the sectors to memory. */
+ 613:../cyfxmscdrv.c ****         for (index = 0; index < CY_FX_MSC_TEST_SECTOR_COUNT; index++)
+ 1874              		.loc 1 613 0
+ 1875 123c 0030A0E3 		mov	r3, #0
+ 1876 1240 B6304BE1 		strh	r3, [fp, #-6]	@ movhi
+ 1877 1244 2C0000EA 		b	.L110
+ 1878              	.L115:
+ 614:../cyfxmscdrv.c ****         {
+ 615:../cyfxmscdrv.c ****             if ((glMscTestSector >= (glMscCapacity - CY_FX_MSC_TEST_SECTOR_COUNT))
+ 1879              		.loc 1 615 0
+ 1880 1248 14319FE5 		ldr	r3, .L118+20
+ 1881 124c 003093E5 		ldr	r3, [r3, #0]
+ 1882 1250 0A2043E2 		sub	r2, r3, #10
+ 1883 1254 0C319FE5 		ldr	r3, .L118+24
+ 1884 1258 003093E5 		ldr	r3, [r3, #0]
+ 1885 125c 030052E1 		cmp	r2, r3
+ 1886 1260 0300009A 		bls	.L111
+ 616:../cyfxmscdrv.c ****                     || (glMscTestSector < CY_FX_MSC_TEST_SECTOR_OFFSET))
+ 1887              		.loc 1 616 0
+ 1888 1264 FC309FE5 		ldr	r3, .L118+24
+ 1889 1268 003093E5 		ldr	r3, [r3, #0]
+ 1890 126c FF0053E3 		cmp	r3, #255
+ 1891 1270 0200008A 		bhi	.L112
+ 1892              	.L111:
+ 617:../cyfxmscdrv.c ****             {
+ 618:../cyfxmscdrv.c ****                 glMscTestSector = CY_FX_MSC_TEST_SECTOR_OFFSET;
+ 1893              		.loc 1 618 0
+ 1894 1274 EC309FE5 		ldr	r3, .L118+24
+ 1895 1278 012CA0E3 		mov	r2, #256
+ 1896 127c 002083E5 		str	r2, [r3, #0]
+ 1897              	.L112:
+ 619:../cyfxmscdrv.c ****             }
+ 620:../cyfxmscdrv.c **** 
+ 621:../cyfxmscdrv.c **** #ifdef CY_FX_MSC_ENABLE_WRITE_TEST
+ 622:../cyfxmscdrv.c ****             /* Pre-fill the buffer with known pattern. */
+ 623:../cyfxmscdrv.c ****             pattern = (uint8_t)(glMscTestSector + index);
+ 624:../cyfxmscdrv.c ****             CyU3PMemSet (glMscSector, pattern, glMscSectorSize);
+ 625:../cyfxmscdrv.c ****             CyU3PDebugPrint (6, "Writing to sector: %d.\r\n", glMscSector);
+ 626:../cyfxmscdrv.c ****             status = CyFxMscWriteSectors (glMscTestLun, glMscTestSector, 1, glMscSector);
+ 627:../cyfxmscdrv.c ****             if (status != CY_U3P_SUCCESS)
+ 628:../cyfxmscdrv.c ****             {
+ 629:../cyfxmscdrv.c ****                 break;
+ 630:../cyfxmscdrv.c ****             }
+ 631:../cyfxmscdrv.c **** #endif /* CY_FX_MSC_ENABLE_WRITE_TEST */
+ 632:../cyfxmscdrv.c **** 
+ 633:../cyfxmscdrv.c ****             /* Read back and verify. */
+ 634:../cyfxmscdrv.c ****             CyU3PMemSet (glMscSector, 0, glMscSectorSize);
+ 1898              		.loc 1 634 0
+ 1899 1280 E4309FE5 		ldr	r3, .L118+28
+ 1900 1284 B030D3E1 		ldrh	r3, [r3, #0]
+ 1901 1288 E0009FE5 		ldr	r0, .L118+32
+ 1902 128c 0010A0E3 		mov	r1, #0
+ 1903 1290 0320A0E1 		mov	r2, r3
+ 1904 1294 FEFFFFEB 		bl	CyU3PMemSet
+ 635:../cyfxmscdrv.c ****             CyU3PDebugPrint (6, "Reading from sector: %d.\r\n", glMscSector);
+ 1905              		.loc 1 635 0
+ 1906 1298 0600A0E3 		mov	r0, #6
+ 1907 129c D0109FE5 		ldr	r1, .L118+36
+ 1908 12a0 C8209FE5 		ldr	r2, .L118+32
+ 1909 12a4 FEFFFFEB 		bl	CyU3PDebugPrint
+ 636:../cyfxmscdrv.c ****             status = CyFxMscReadSectors (glMscTestLun, glMscTestSector, 1, glMscSector);
+ 1910              		.loc 1 636 0
+ 1911 12a8 C8309FE5 		ldr	r3, .L118+40
+ 1912 12ac 0020D3E5 		ldrb	r2, [r3, #0]	@ zero_extendqisi2
+ 1913 12b0 B0309FE5 		ldr	r3, .L118+24
+ 1914 12b4 003093E5 		ldr	r3, [r3, #0]
+ 1915 12b8 0200A0E1 		mov	r0, r2
+ 1916 12bc 0310A0E1 		mov	r1, r3
+ 1917 12c0 0120A0E3 		mov	r2, #1
+ 1918 12c4 A4309FE5 		ldr	r3, .L118+32
+ 1919 12c8 FEFFFFEB 		bl	CyFxMscReadSectors
+ 1920 12cc 0C000BE5 		str	r0, [fp, #-12]
+ 637:../cyfxmscdrv.c ****             if (status != CY_U3P_SUCCESS)
+ 1921              		.loc 1 637 0
+ 1922 12d0 0C301BE5 		ldr	r3, [fp, #-12]
+ 1923 12d4 000053E3 		cmp	r3, #0
+ 1924 12d8 0B00001A 		bne	.L117
+ 1925              	.L113:
+ 638:../cyfxmscdrv.c ****             {
+ 639:../cyfxmscdrv.c ****                 break;
+ 640:../cyfxmscdrv.c ****             }
+ 641:../cyfxmscdrv.c **** #ifdef CY_FX_MSC_ENABLE_WRITE_TEST
+ 642:../cyfxmscdrv.c ****             for (temp = 0; temp < glMscSectorSize; temp++)
+ 643:../cyfxmscdrv.c ****             {
+ 644:../cyfxmscdrv.c ****                 if (glMscSector[temp] != pattern)
+ 645:../cyfxmscdrv.c ****                 {
+ 646:../cyfxmscdrv.c ****                     CyU3PDebugPrint (6, "Compare failed for sector: %d at byte %d.\r\n", glMscSecto
+ 647:../cyfxmscdrv.c ****                     status = CY_U3P_ERROR_FAILURE;
+ 648:../cyfxmscdrv.c ****                     break;
+ 649:../cyfxmscdrv.c ****                 }
+ 650:../cyfxmscdrv.c ****             }
+ 651:../cyfxmscdrv.c ****             if (status != CY_U3P_SUCCESS)
+ 652:../cyfxmscdrv.c ****             {
+ 653:../cyfxmscdrv.c ****                 break;
+ 654:../cyfxmscdrv.c ****             }
+ 655:../cyfxmscdrv.c **** #endif /* CY_FX_MSC_ENABLE_WRITE_TEST */
+ 656:../cyfxmscdrv.c **** 
+ 657:../cyfxmscdrv.c ****             /* Increment the test sector. */
+ 658:../cyfxmscdrv.c ****             glMscTestSector++;
+ 1926              		.loc 1 658 0
+ 1927 12dc 84309FE5 		ldr	r3, .L118+24
+ 1928 12e0 003093E5 		ldr	r3, [r3, #0]
+ 1929 12e4 012083E2 		add	r2, r3, #1
+ 1930 12e8 78309FE5 		ldr	r3, .L118+24
+ 1931 12ec 002083E5 		str	r2, [r3, #0]
+ 613:../cyfxmscdrv.c ****         for (index = 0; index < CY_FX_MSC_TEST_SECTOR_COUNT; index++)
+ 1932              		.loc 1 613 0
+ 1933 12f0 B6305BE1 		ldrh	r3, [fp, #-6]	@ movhi
+ 1934 12f4 013083E2 		add	r3, r3, #1
+ 1935 12f8 B6304BE1 		strh	r3, [fp, #-6]	@ movhi
+ 1936              	.L110:
+ 613:../cyfxmscdrv.c ****         for (index = 0; index < CY_FX_MSC_TEST_SECTOR_COUNT; index++)
+ 1937              		.loc 1 613 0 is_stmt 0 discriminator 1
+ 1938 12fc B6305BE1 		ldrh	r3, [fp, #-6]
+ 1939 1300 090053E3 		cmp	r3, #9
+ 1940 1304 CFFFFF9A 		bls	.L115
+ 1941 1308 000000EA 		b	.L114
+ 1942              	.L117:
+ 639:../cyfxmscdrv.c ****                 break;
+ 1943              		.loc 1 639 0 is_stmt 1
+ 1944 130c 0000A0E1 		mov	r0, r0	@ nop
+ 1945              	.L114:
+ 659:../cyfxmscdrv.c ****         }
+ 660:../cyfxmscdrv.c **** 
+ 661:../cyfxmscdrv.c ****         /* If an error was encountered, stop the test. */
+ 662:../cyfxmscdrv.c ****         if (status == CY_U3P_SUCCESS)
+ 1946              		.loc 1 662 0
+ 1947 1310 0C301BE5 		ldr	r3, [fp, #-12]
+ 1948 1314 000053E3 		cmp	r3, #0
+ 1949 1318 0300001A 		bne	.L116
+ 663:../cyfxmscdrv.c ****         {
+ 664:../cyfxmscdrv.c ****             CyU3PDebugPrint (4, "Completed MSC read / write tests.\r\n");
+ 1950              		.loc 1 664 0
+ 1951 131c 0400A0E3 		mov	r0, #4
+ 1952 1320 54109FE5 		ldr	r1, .L118+44
+ 1953 1324 FEFFFFEB 		bl	CyU3PDebugPrint
+ 1954 1328 060000EA 		b	.L108
+ 1955              	.L116:
+ 665:../cyfxmscdrv.c ****         }
+ 666:../cyfxmscdrv.c ****         else
+ 667:../cyfxmscdrv.c ****         {
+ 668:../cyfxmscdrv.c ****             CyU3PDebugPrint (4, "MSC test failed with status: %d.\r\n", status);
+ 1956              		.loc 1 668 0
+ 1957 132c 0400A0E3 		mov	r0, #4
+ 1958 1330 48109FE5 		ldr	r1, .L118+48
+ 1959 1334 0C201BE5 		ldr	r2, [fp, #-12]
+ 1960 1338 FEFFFFEB 		bl	CyU3PDebugPrint
+ 669:../cyfxmscdrv.c ****             glMscIsActive = CyFalse;
+ 1961              		.loc 1 669 0
+ 1962 133c 10309FE5 		ldr	r3, .L118+4
+ 1963 1340 0020A0E3 		mov	r2, #0
+ 1964 1344 002083E5 		str	r2, [r3, #0]
+ 1965              	.L108:
+ 670:../cyfxmscdrv.c ****         }
+ 671:../cyfxmscdrv.c ****     }
+ 672:../cyfxmscdrv.c **** }
+ 1966              		.loc 1 672 0
+ 1967 1348 04D04BE2 		sub	sp, fp, #4
+ 1968 134c 0088BDE8 		ldmfd	sp!, {fp, pc}
+ 1969              	.L119:
+ 1970              		.align	2
+ 1971              	.L118:
+ 1972 1350 00000000 		.word	glTimerCount
+ 1973 1354 00000000 		.word	glMscIsActive
+ 1974 1358 73B2E745 		.word	1172812403
+ 1975 135c 60EA0000 		.word	60000
+ 1976 1360 00000000 		.word	.LC0
+ 1977 1364 00000000 		.word	glMscCapacity
+ 1978 1368 00000000 		.word	glMscTestSector
+ 1979 136c 00000000 		.word	glMscSectorSize
+ 1980 1370 00000000 		.word	glMscSector
+ 1981 1374 24000000 		.word	.LC1
+ 1982 1378 00000000 		.word	glMscTestLun
+ 1983 137c 40000000 		.word	.LC2
+ 1984 1380 64000000 		.word	.LC3
+ 1985              		.cfi_endproc
+ 1986              	.LFE12:
+ 1988              	.Letext0:
+DEFINED SYMBOLS
+                            *ABS*:00000000 cyfxmscdrv.c
+                            *COM*:00000028 glDMAEvent
+                            *COM*:000000a0 glHostAoACh
+                            *COM*:000000a0 glI2SRightCh
+                            *COM*:000000a0 glI2SLeftCh
+                            *COM*:00000004 prodCount
+                            *COM*:00000004 consCount
+                            *COM*:00000004 bufCount
+                            *COM*:00000004 lc
+                            *COM*:00000004 rc
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:34     .bss:00000000 glMscInEp
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:35     .bss:00000000 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:39     .bss:00000001 glMscOutEp
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:45     .bss:00000002 glMscEpSize
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:51     .bss:00000004 glMscSectorSize
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:57     .bss:00000008 glMscCapacity
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:62     .bss:0000000c glMscTestLun
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:68     .bss:00000010 glMscTestSector
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:74     .bss:00000014 glTimerCount
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:80     .bss:00000018 glMscIsActive
+                            *COM*:000000a0 glMscInCh
+                            *COM*:000000a0 glMscOutCh
+                            *COM*:00000020 glMscCBW
+                            *COM*:00000020 glMscCSW
+                            *COM*:00001000 glMscSector
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:88     .text:00000000 $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:90     .text:00000000 CyFxMyFormatCBW
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:221    .text:0000016c CyFxMyFormatCmd
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:298    .text:00000238 CyFxMscErrorRecovery
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:401    .text:00000350 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:409    .text:00000364 $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:412    .text:00000364 CyFxMscSendBuffer
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:511    .text:00000464 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:517    .text:00000470 $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:520    .text:00000470 CyFxMscRecvBuffer
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:619    .text:00000570 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:625    .text:0000057c $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:628    .text:0000057c CyFxMscCheckCSW
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:697    .text:00000610 CyFxMscTestUnitReady
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:766    .text:000006b8 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:771    .text:000006c0 $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:774    .text:000006c0 CyFxMscReadCapacity
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:919    .text:00000858 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:927    .text:0000086c $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:930    .text:0000086c CyFxMscReadSectors
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1033   .text:0000097c $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1040   .text:0000098c $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1043   .text:0000098c CyFxMscWriteSectors
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1146   .text:00000a9c $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1153   .text:00000aac $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1156   .text:00000aac CyFxMscDriverInit
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1686   .text:00001088 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1702   .text:000010bc $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1705   .text:000010bc CyFxMscDriverDeInit
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1788   .text:00001184 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1803   .rodata:00000000 $d
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1816   .text:000011b0 $a
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1819   .text:000011b0 CyFxMscDriverDoWork
+C:\Users\kumr\AppData\Local\Temp\ccpYPYkO.s:1972   .text:00001350 $d
+                     .debug_frame:00000010 $d
+
+UNDEFINED SYMBOLS
+CyU3PMemSet
+CyU3PDmaChannelReset
+CyU3PUsbHostEpAbort
+CyFxSendSetupRqt
+CyU3PUsbHostEpReset
+glEp0Buffer
+CyU3PDmaChannelSetupSendBuffer
+CyU3PUsbHostEpSetXfer
+CyU3PUsbHostEpWaitForCompletion
+CyU3PDmaChannelWaitForCompletion
+CyU3PDmaChannelSetupRecvBuffer
+CyU3PUsbHostEpAdd
+CyU3PDmaChannelCreate
+_tx_thread_sleep
+CyU3PDmaChannelDestroy
+CyU3PUsbHostEpRemove
+CyU3PDebugPrint
